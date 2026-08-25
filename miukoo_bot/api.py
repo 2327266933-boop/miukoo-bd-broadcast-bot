@@ -45,9 +45,20 @@ def make_handler(service: BotService):
         def do_POST(self) -> None:
             path = urlparse(self.path).path
             try:
+                if path == "/api/tasks/preview":
+                    payload = self._read_json()
+                    self._send_json(200, service.preview_task(payload))
+                    return
+
                 if path == "/api/tasks":
                     payload = self._read_json()
                     self._send_json(201, service.create_task(payload))
+                    return
+
+                stop_path = self._match_stop_recipient_path(path)
+                if stop_path[0]:
+                    task_id, recipient_id = stop_path
+                    self._send_json(200, service.stop_recipient(task_id, recipient_id))
                     return
 
                 cancel_task_id = self._match_cancel_path(path)
@@ -123,6 +134,18 @@ def make_handler(service: BotService):
                 if task_id and "/" not in task_id:
                     return task_id
             return ""
+
+        def _match_stop_recipient_path(self, path: str) -> Tuple[str, str]:
+            prefix = "/api/tasks/"
+            suffix = "/stop"
+            if not path.startswith(prefix) or not path.endswith(suffix):
+                return "", ""
+
+            middle = path[len(prefix):-len(suffix)]
+            parts = [part for part in middle.split("/") if part]
+            if len(parts) == 3 and parts[1] == "recipients":
+                return parts[0], parts[2]
+            return "", ""
 
         def _match_webhook_path(self, path: str) -> str:
             prefix = "/api/webhooks/"

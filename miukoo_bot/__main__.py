@@ -4,7 +4,7 @@ from dataclasses import replace
 from miukoo_bot.api import run_http_server
 from miukoo_bot.config import load_settings
 from miukoo_bot.db import SQLiteStore
-from miukoo_bot.messaging import MockMessageAdapter
+from miukoo_bot.messaging import build_message_adapter
 from miukoo_bot.scheduler import FollowUpScheduler
 from miukoo_bot.service import BotService
 from miukoo_bot.templates import TemplateStore
@@ -16,7 +16,7 @@ def build_service(settings):
     return BotService(
         store=store,
         templates=TemplateStore(),
-        adapter=MockMessageAdapter(echo=True),
+        adapter=build_message_adapter(settings),
         settings=settings,
     )
 
@@ -26,6 +26,11 @@ def main() -> None:
     parser.add_argument("--host", help="HTTP host")
     parser.add_argument("--port", type=int, help="HTTP port")
     parser.add_argument("--database", help="SQLite database path")
+    parser.add_argument(
+        "--adapter",
+        choices=["mock", "lark", "feishu"],
+        help="Message adapter to use",
+    )
     parser.add_argument(
         "--scheduler-interval-seconds",
         type=int,
@@ -50,6 +55,8 @@ def main() -> None:
         settings = replace(settings, port=args.port)
     if args.database:
         settings = replace(settings, database_path=args.database)
+    if args.adapter:
+        settings = replace(settings, message_adapter=args.adapter)
     if args.scheduler_interval_seconds:
         settings = replace(
             settings,

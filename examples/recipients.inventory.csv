@@ -1,0 +1,3 @@
+bd_id,name,contact_id,group,city,shop_count,deadline
+bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00
+bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00

@@ -283,6 +283,43 @@ class SQLiteStore:
                 (reason, recipient_id),
             )
 
+    def stop_recipient(self, task_id: str, recipient_id: str) -> bool:
+        with self._lock, self._connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM recipients WHERE task_id = ? AND id = ?",
+                (task_id, recipient_id),
+            ).fetchone()
+            if existing is None:
+                return False
+
+            conn.execute(
+                """
+                UPDATE recipients
+                SET status = 'cancelled',
+                    next_remind_at = NULL
+                WHERE task_id = ?
+                  AND id = ?
+                  AND status NOT IN ('replied', 'completed', 'failed')
+                """,
+                (task_id, recipient_id),
+            )
+            return True
+
+    def count_sent_messages_to_contact(self, contact_id: str, since_iso: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM message_logs m
+                JOIN recipients r ON r.id = m.recipient_id
+                WHERE r.contact_id = ?
+                  AND m.status = 'sent'
+                  AND m.sent_at >= ?
+                """,
+                (contact_id, since_iso),
+            ).fetchone()
+        return int(row["count"] or 0)
+
     def log_message(self, message: Dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(

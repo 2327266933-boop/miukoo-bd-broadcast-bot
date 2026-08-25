@@ -40,21 +40,29 @@
 - SQLite 持久化：任务、收件人、发送日志、回复日志。
 - 模板引擎：按消息类型渲染首发消息和提醒消息。
 - Mock 消息适配器：本地打印消息，不真实触达 BD。
+- 飞书/Lark 发送适配器：配置密钥后可调用飞书消息 API。
+- CSV 导入：支持从表格导出的 CSV 创建收件人名单。
+- 任务预览：正式发送前可预览每个 BD 实际收到的消息。
+- 单人停催：支持对某个收件人停止后续提醒。
+- 基础频控：默认同一 `contact_id` 24 小时最多发送 3 条。
 - 后台提醒线程：定时扫描未回复对象，到点后自动提醒。
-- 单元测试：覆盖首发、提醒、回复停止提醒、模板变量校验。
+- 单元测试：覆盖首发、提醒、回复停止提醒、模板变量校验、CSV、预览、停催、频控。
 
 ### 目录结构
 
 ```text
 .
+├── .env.example
 ├── README.md
 ├── examples/
+│   ├── recipients.inventory.csv
 │   └── task.inventory.json
 ├── miukoo_bot/
 │   ├── __main__.py
 │   ├── api.py
 │   ├── config.py
 │   ├── db.py
+│   ├── importers.py
 │   ├── messaging.py
 │   ├── scheduler.py
 │   ├── service.py
@@ -68,7 +76,7 @@
 ### 本地运行
 
 ```bash
-python3 -m miukoo_bot --host 127.0.0.1 --port 8080
+python3 -m miukoo_bot --host 127.0.0.1 --port 8080 --adapter mock
 ```
 
 健康检查：
@@ -81,6 +89,14 @@ curl http://127.0.0.1:8080/health
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/tasks \
+  -H 'Content-Type: application/json' \
+  --data @examples/task.inventory.json
+```
+
+预览任务，不真实发送：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/tasks/preview \
   -H 'Content-Type: application/json' \
   --data @examples/task.inventory.json
 ```
@@ -99,6 +115,12 @@ curl -X POST http://127.0.0.1:8080/api/webhooks/mock/message \
   -d '{"task_id":"替换成任务ID","bd_id":"bd_001","content":"已确认"}'
 ```
 
+停止某个 BD 后续提醒：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/tasks/{task_id}/recipients/{recipient_id}/stop
+```
+
 手动触发一次提醒扫描：
 
 ```bash
@@ -110,6 +132,35 @@ curl -X POST http://127.0.0.1:8080/api/scheduler/run-once
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+### CSV 导入
+
+CSV 文件示例见 `examples/recipients.inventory.csv`：
+
+```csv
+bd_id,name,contact_id,group,city,shop_count,deadline
+bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00
+bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00
+```
+
+创建任务时使用 `recipients_csv_path`：
+
+```json
+{
+  "task_name": "8月门店库存确认",
+  "channel": "mock",
+  "message_type": "inventory_check",
+  "recipients_csv_path": "examples/recipients.inventory.csv",
+  "follow_up": {
+    "enabled": true,
+    "first_remind_after_minutes": 120,
+    "remind_interval_minutes": 180,
+    "max_remind_times": 2
+  }
+}
+```
+
+固定字段包括 `bd_id`、`name`、`contact_id`、`mobile`、`group`、`variables_json`。其他列会自动作为模板变量；以 `variable_` 开头的列会去掉前缀后作为变量名。
 
 ## 非目标
 
@@ -339,10 +390,22 @@ Content-Type: application/json
 GET /api/tasks/{task_id}
 ```
 
+### 预览任务
+
+```http
+POST /api/tasks/preview
+```
+
 ### 取消任务
 
 ```http
 POST /api/tasks/{task_id}/cancel
+```
+
+### 停止单人提醒
+
+```http
+POST /api/tasks/{task_id}/recipients/{recipient_id}/stop
 ```
 
 ### 回复回调
@@ -354,21 +417,31 @@ POST /api/webhooks/{channel}/message
 ## 环境变量
 
 ```bash
-APP_ENV=development
-DATABASE_URL=postgres://user:password@localhost:5432/bd_bot
-REDIS_URL=redis://localhost:6379/0
+BD_BOT_DATABASE=data/bd_bot.sqlite3
+BD_BOT_HOST=127.0.0.1
+BD_BOT_PORT=8080
+BD_BOT_ADAPTER=mock
+BD_BOT_SCHEDULER_INTERVAL_SECONDS=30
 
-MESSAGE_CHANNEL=lark
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
-LARK_VERIFICATION_TOKEN=xxx
-LARK_ENCRYPT_KEY=xxx
+LARK_RECEIVE_ID_TYPE=open_id
 
 DEFAULT_FIRST_REMIND_AFTER_MINUTES=120
 DEFAULT_REMIND_INTERVAL_MINUTES=180
 DEFAULT_MAX_REMIND_TIMES=2
+DAILY_MESSAGE_LIMIT_PER_CONTACT=3
 QUIET_HOURS_START=21:00
 QUIET_HOURS_END=09:00
+```
+
+本地开发默认使用 `BD_BOT_ADAPTER=mock`。接入飞书时改为：
+
+```bash
+BD_BOT_ADAPTER=lark
+LARK_APP_ID=cli_xxx
+LARK_APP_SECRET=xxx
+LARK_RECEIVE_ID_TYPE=open_id
 ```
 
 ## 发送前校验
