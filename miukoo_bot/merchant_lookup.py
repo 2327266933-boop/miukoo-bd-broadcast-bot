@@ -2,7 +2,6 @@ import csv
 import json
 import time
 from typing import Any, Dict, Iterable, List, Tuple
-from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -150,18 +149,19 @@ class MerchantBDLookup:
         ):
             return self._cached_access_token
 
-        form = {
-            "grant_type": "client_credentials",
-            "client_id": self.settings.fengshen_client_id,
-            "client_secret": self.settings.fengshen_client_secret,
+        payload = {
+            self.settings.fengshen_client_id_field: self.settings.fengshen_client_id,
+            self.settings.fengshen_client_secret_field: (
+                self.settings.fengshen_client_secret
+            ),
         }
         if self.settings.fengshen_scope:
-            form["scope"] = self.settings.fengshen_scope
+            payload["scope"] = self.settings.fengshen_scope
 
         request = Request(
             self.settings.fengshen_token_url,
-            data=urlencode(form).encode("utf-8"),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
             method="POST",
         )
         try:
@@ -357,6 +357,9 @@ def extract_access_token(payload: Dict[str, Any]) -> Tuple[str, int]:
             item.get("access_token")
             or item.get("token")
             or item.get("accessToken")
+            or item.get("jwtToken")
+            or item.get("jwt_token")
+            or item.get("jwt")
         )
         if token:
             expires_in = item.get("expires_in") or item.get("expiresIn") or 3600

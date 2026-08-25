@@ -3,6 +3,9 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+FENGSHEN_CN_TOKEN_URL = "https://data.bytedance.net/aeolus/api/v3/openapi/jwtToken"
+
+
 @dataclass(frozen=True)
 class Settings:
     database_path: str
@@ -27,6 +30,8 @@ class Settings:
     fengshen_token_url: Optional[str]
     fengshen_client_id: Optional[str]
     fengshen_client_secret: Optional[str]
+    fengshen_client_id_field: str
+    fengshen_client_secret_field: str
     fengshen_scope: Optional[str]
     fengshen_timeout_seconds: int
 
@@ -66,11 +71,19 @@ def load_settings() -> Settings:
             "FENGSHEN_MERCHANT_BD_LOOKUP_URL"
         ),
         fengshen_api_token=os.environ.get("FENGSHEN_API_TOKEN"),
-        fengshen_token_url=os.environ.get("FENGSHEN_TOKEN_URL"),
+        fengshen_token_url=os.environ.get("FENGSHEN_TOKEN_URL", FENGSHEN_CN_TOKEN_URL),
         fengshen_client_id=os.environ.get("FENGSHEN_CLIENT_ID"),
         fengshen_client_secret=(
             os.environ.get("FENGSHEN_CLIENT_SECRET")
             or os.environ.get("FENGSHEN_CLIENT_PASSWORD")
+        ),
+        fengshen_client_id_field=os.environ.get(
+            "FENGSHEN_CLIENT_ID_FIELD",
+            "clientId",
+        ),
+        fengshen_client_secret_field=os.environ.get(
+            "FENGSHEN_CLIENT_SECRET_FIELD",
+            "clientSecret",
         ),
         fengshen_scope=os.environ.get("FENGSHEN_SCOPE"),
         fengshen_timeout_seconds=int(os.environ.get("FENGSHEN_TIMEOUT_SECONDS", "10")),

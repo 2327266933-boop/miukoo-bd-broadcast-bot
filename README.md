@@ -287,13 +287,38 @@ FENGSHEN_API_TOKEN=your-token
 如果风神给的是 client ID 和 client secret/password，配置：
 
 ```bash
-FENGSHEN_TOKEN_URL=https://your-fengshen-token-endpoint
+FENGSHEN_TOKEN_URL=https://data.bytedance.net/aeolus/api/v3/openapi/jwtToken
 FENGSHEN_CLIENT_ID=your-client-id
 FENGSHEN_CLIENT_SECRET=your-client-secret
+FENGSHEN_CLIENT_ID_FIELD=clientId
+FENGSHEN_CLIENT_SECRET_FIELD=clientSecret
 FENGSHEN_SCOPE=
 ```
 
 不要把真实 client ID、secret、password 写进代码、README、CSV 或 GitHub 仓库。部署时放到服务器环境变量或 GitHub/云平台 Secrets。
+
+当前默认使用 CN 环境 token URL：
+
+```http
+POST https://data.bytedance.net/aeolus/api/v3/openapi/jwtToken
+Content-Type: application/json
+```
+
+默认 token 请求体字段是：
+
+```json
+{
+  "clientId": "your-client-id",
+  "clientSecret": "your-client-secret"
+}
+```
+
+如果风神文档要求字段名是 `client_id/client_secret` 或其他名称，改环境变量：
+
+```bash
+FENGSHEN_CLIENT_ID_FIELD=client_id
+FENGSHEN_CLIENT_SECRET_FIELD=client_secret
+```
 
 当前服务会向风神地址发送：
 
@@ -621,9 +646,11 @@ MERCHANT_BD_LOOKUP_PROVIDER=csv
 MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
 FENGSHEN_MERCHANT_BD_LOOKUP_URL=
 FENGSHEN_API_TOKEN=
-FENGSHEN_TOKEN_URL=
+FENGSHEN_TOKEN_URL=https://data.bytedance.net/aeolus/api/v3/openapi/jwtToken
 FENGSHEN_CLIENT_ID=
 FENGSHEN_CLIENT_SECRET=
+FENGSHEN_CLIENT_ID_FIELD=clientId
+FENGSHEN_CLIENT_SECRET_FIELD=clientSecret
 FENGSHEN_SCOPE=
 FENGSHEN_TIMEOUT_SECONDS=10
 

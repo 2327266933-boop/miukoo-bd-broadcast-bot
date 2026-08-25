@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
-from urllib.parse import parse_qs
 
 from miukoo_bot.config import Settings
 from miukoo_bot.db import SQLiteStore
@@ -98,6 +97,8 @@ class BotServiceTest(unittest.TestCase):
             fengshen_token_url=None,
             fengshen_client_id=None,
             fengshen_client_secret=None,
+            fengshen_client_id_field="clientId",
+            fengshen_client_secret_field="clientSecret",
             fengshen_scope=None,
             fengshen_timeout_seconds=10,
         )
@@ -226,6 +227,8 @@ class BotServiceTest(unittest.TestCase):
             fengshen_token_url=self.settings.fengshen_token_url,
             fengshen_client_id=self.settings.fengshen_client_id,
             fengshen_client_secret=self.settings.fengshen_client_secret,
+            fengshen_client_id_field=self.settings.fengshen_client_id_field,
+            fengshen_client_secret_field=self.settings.fengshen_client_secret_field,
             fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
         )
@@ -308,7 +311,8 @@ class BotServiceTest(unittest.TestCase):
 
     def test_fengshen_lookup_can_use_client_credentials_token(self):
         captured = {
-            "token_body": "",
+            "token_body": {},
+            "token_content_type": "",
             "lookup_authorization": "",
         }
 
@@ -320,10 +324,14 @@ class BotServiceTest(unittest.TestCase):
                 length = int(handler_self.headers.get("Content-Length", "0"))
                 body = handler_self.rfile.read(length).decode("utf-8")
                 if handler_self.path == "/token":
-                    captured["token_body"] = body
+                    captured["token_content_type"] = handler_self.headers.get(
+                        "Content-Type",
+                        "",
+                    )
+                    captured["token_body"] = json.loads(body)
                     handler_self._send_json(
                         {
-                            "access_token": "fengshen_test_token",
+                            "jwtToken": "fengshen_test_token",
                             "expires_in": 3600,
                         }
                     )
@@ -386,10 +394,9 @@ class BotServiceTest(unittest.TestCase):
 
             result = self.service.lookup_merchant_bds({"text": "上海悦来火锅"})
 
-            token_body = parse_qs(captured["token_body"])
-            self.assertEqual(token_body["grant_type"], ["client_credentials"])
-            self.assertEqual(token_body["client_id"], ["client-id"])
-            self.assertEqual(token_body["client_secret"], ["client-secret"])
+            self.assertIn("application/json", captured["token_content_type"])
+            self.assertEqual(captured["token_body"]["clientId"], "client-id")
+            self.assertEqual(captured["token_body"]["clientSecret"], "client-secret")
             self.assertEqual(
                 captured["lookup_authorization"],
                 "Bearer fengshen_test_token",
@@ -525,6 +532,8 @@ class BotServiceTest(unittest.TestCase):
             fengshen_token_url=self.settings.fengshen_token_url,
             fengshen_client_id=self.settings.fengshen_client_id,
             fengshen_client_secret=self.settings.fengshen_client_secret,
+            fengshen_client_id_field=self.settings.fengshen_client_id_field,
+            fengshen_client_secret_field=self.settings.fengshen_client_secret_field,
             fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
         )

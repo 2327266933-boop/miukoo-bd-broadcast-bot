@@ -89,6 +89,8 @@ class APITest(unittest.TestCase):
             fengshen_token_url=None,
             fengshen_client_id=None,
             fengshen_client_secret=None,
+            fengshen_client_id_field="clientId",
+            fengshen_client_secret_field="clientSecret",
             fengshen_scope=None,
             fengshen_timeout_seconds=10,
         )
