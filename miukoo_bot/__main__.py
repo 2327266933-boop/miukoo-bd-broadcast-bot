@@ -22,7 +22,7 @@ def build_service(settings):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="BD group broadcast and follow-up bot")
+    parser = argparse.ArgumentParser(description="BD broadcast workbench")
     parser.add_argument("--host", help="HTTP host")
     parser.add_argument("--port", type=int, help="HTTP port")
     parser.add_argument("--database", help="SQLite database path")

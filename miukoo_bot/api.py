@@ -224,6 +224,6 @@ def run_http_server(
 ) -> Tuple[ThreadingHTTPServer, str]:
     server = ThreadingHTTPServer((host, port), make_handler(service))
     url = "http://{}:{}".format(host, port)
-    print("BD group bot API listening on {}".format(url), flush=True)
+    print("BD broadcast workbench listening on {}".format(url), flush=True)
     server.serve_forever()
     return server, url

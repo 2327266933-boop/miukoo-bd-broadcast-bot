@@ -2,7 +2,7 @@
   <header class="topbar">
     <div>
       <h1>BD 群发工作台</h1>
-      <p>任务创建、消息预览、回复跟踪和提醒控制</p>
+      <p>商家查销售、消息预览、任务跟进和回复整理</p>
     </div>
     <div class="topbar-actions">
       <span id="apiStatus" class="status-dot">API 检查中</span>
@@ -23,10 +23,10 @@
           <input id="taskName" value="BD任务提醒" />
         </label>
         <label>
-          <span>发送渠道</span>
+          <span>发送模式</span>
           <select id="channel">
-            <option value="mock">mock</option>
-            <option value="lark">lark</option>
+            <option value="mock">网页演示</option>
+            <option value="lark">飞书发送</option>
           </select>
         </label>
         <label>
@@ -88,7 +88,7 @@
       <div class="button-row">
         <button id="loadSampleBtn" type="button" class="secondary">载入示例</button>
         <button id="previewBtn" type="button" class="secondary">预览消息</button>
-        <button id="createBtn" type="button" class="primary">创建并发送</button>
+        <button id="createBtn" type="button" class="primary">创建任务</button>
       </div>
 
       <div id="notice" class="notice hidden"></div>
