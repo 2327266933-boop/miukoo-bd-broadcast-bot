@@ -67,6 +67,14 @@ CONTACT_ID_FIELDS = (
     "销售飞书user_id",
 )
 GROUP_FIELDS = ("group", "region", "city_group", "区域", "分组", "城市")
+DEPARTMENT_FIELDS = (
+    "department",
+    "department_name",
+    "department_path",
+    "部门",
+    "所属部门",
+    "部门路径",
+)
 
 
 class MerchantBDLookup:
@@ -93,6 +101,7 @@ class MerchantBDLookup:
         else:
             result = self._lookup_from_csv(merchant_names)
 
+        self._resolve_sales_contacts(result)
         result["recipients"] = build_recipients_from_lookup_results(result["results"])
         result["recipient_count"] = len(result["recipients"])
         return result
@@ -232,6 +241,47 @@ class MerchantBDLookup:
         self._cached_access_token_expires_at = now + expires_in
         return token
 
+    def _resolve_sales_contacts(self, response: Dict[str, Any]) -> None:
+        directory = self._load_sales_contact_directory()
+        if not directory:
+            return
+
+        for result in response["results"]:
+            if not result.get("matches"):
+                continue
+            for match in result["matches"]:
+                if match.get("contact_id"):
+                    continue
+                sales_name = match.get("sales_name") or match.get("name")
+                if not sales_name:
+                    continue
+                resolution = resolve_sales_contact(
+                    sales_name,
+                    directory,
+                    self.settings.sales_target_department,
+                )
+                match["sales_resolution"] = resolution
+                if resolution["status"] in ("resolved", "resolved_by_department"):
+                    selected = resolution["selected"]
+                    match["contact_id"] = selected.get("contact_id") or ""
+                    match["bd_id"] = match.get("bd_id") or selected.get("bd_id") or sales_name
+                    match["group"] = match.get("group") or selected.get("department") or ""
+                    match["department"] = selected.get("department") or ""
+                    match["variables"]["department"] = selected.get("department") or ""
+                elif result["status"] == "matched":
+                    result["status"] = "ambiguous"
+                    result["message"] = resolution["message"]
+
+    def _load_sales_contact_directory(self) -> List[Dict[str, Any]]:
+        path = self.settings.sales_contact_directory_csv
+        if not path:
+            return []
+        try:
+            with open(path, newline="", encoding="utf-8-sig") as csv_file:
+                return [normalize_sales_contact(row) for row in csv.DictReader(csv_file)]
+        except FileNotFoundError:
+            return []
+
 
 def split_merchant_names(value: Any) -> List[str]:
     if isinstance(value, str):
@@ -363,6 +413,7 @@ def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Di
     bd_id = first_value(cleaned, BD_ID_FIELDS) or name
     contact_id = first_value(cleaned, CONTACT_ID_FIELDS)
     group = first_value(cleaned, GROUP_FIELDS)
+    department = first_value(cleaned, DEPARTMENT_FIELDS)
     variables = {
         key: value
         for key, value in cleaned.items()
@@ -374,10 +425,13 @@ def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Di
             + BD_NAME_FIELDS
             + CONTACT_ID_FIELDS
             + GROUP_FIELDS
+            + DEPARTMENT_FIELDS
         )
     }
     variables["merchant_name"] = merchant_name
     variables["sales_name"] = name
+    if department:
+        variables["department"] = department
     return {
         "merchant_name": merchant_name,
         "bd_id": bd_id,
@@ -385,7 +439,91 @@ def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Di
         "name": name,
         "contact_id": contact_id,
         "group": group,
+        "department": department,
         "variables": variables,
+    }
+
+
+def normalize_sales_contact(row: Dict[str, Any]) -> Dict[str, str]:
+    cleaned = {str(key).strip(): clean(value) for key, value in row.items()}
+    name = first_value(cleaned, BD_NAME_FIELDS)
+    contact_id = first_value(cleaned, CONTACT_ID_FIELDS)
+    department = first_value(cleaned, DEPARTMENT_FIELDS)
+    bd_id = first_value(cleaned, BD_ID_FIELDS) or name
+    return {
+        "name": name,
+        "bd_id": bd_id,
+        "contact_id": contact_id,
+        "department": department,
+    }
+
+
+def resolve_sales_contact(
+    sales_name: str,
+    directory: List[Dict[str, str]],
+    target_department: str,
+) -> Dict[str, Any]:
+    candidates = [
+        item
+        for item in directory
+        if normalize_name(item.get("name")) == normalize_name(sales_name)
+    ]
+    visible_candidates = [
+        {
+            "name": item.get("name", ""),
+            "bd_id": item.get("bd_id", ""),
+            "contact_id": item.get("contact_id", ""),
+            "department": item.get("department", ""),
+        }
+        for item in candidates
+    ]
+    if not candidates:
+        return {
+            "status": "not_found",
+            "duplicate_name": False,
+            "selected": {},
+            "candidates": [],
+            "message": "No Feishu contact found for sales name {}".format(sales_name),
+        }
+
+    if len(candidates) == 1:
+        return {
+            "status": "resolved",
+            "duplicate_name": False,
+            "selected": candidates[0],
+            "candidates": visible_candidates,
+            "message": "",
+        }
+
+    target = clean(target_department)
+    if target:
+        target_matches = [
+            item
+            for item in candidates
+            if target in clean(item.get("department"))
+        ]
+        if len(target_matches) == 1:
+            return {
+                "status": "resolved_by_department",
+                "duplicate_name": True,
+                "selected": target_matches[0],
+                "candidates": visible_candidates,
+                "message": (
+                    "Duplicate sales name {}; selected department {}".format(
+                        sales_name,
+                        target,
+                    )
+                ),
+            }
+
+    return {
+        "status": "ambiguous",
+        "duplicate_name": True,
+        "selected": {},
+        "candidates": visible_candidates,
+        "message": "Duplicate sales name {} needs manual confirmation".format(
+            sales_name
+        ),
     }
 
 

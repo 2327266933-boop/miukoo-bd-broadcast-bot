@@ -66,6 +66,7 @@
 ├── examples/
 │   ├── merchant_bd_mapping.csv
 │   ├── recipients.inventory.csv
+│   ├── sales_contact_directory.csv
 │   └── task.inventory.json
 ├── miukoo_bot/
 │   ├── __main__.py
@@ -245,6 +246,21 @@ Content-Type: application/json
 
 注意：只查到 `销售名称_最新` 只能证明“商家归属哪个销售”。要让机器人给这个销售发飞书消息，还必须拿到该销售的飞书 `open_id`、`user_id` 或其他可发送的 `contact_id`。
 
+### 重名处理
+
+销售姓名可能重名。系统会按下面规则处理：
+
+- 如果只有一个同名销售，直接使用这个销售的 `contact_id`。
+- 如果有多个同名销售，优先选择部门包含 `服务零售KA——丽人` 的候选人。
+- 如果 `服务零售KA——丽人` 下唯一命中，则自动使用该候选人，同时在查询结果里标记 `duplicate_name=true`。
+- 如果仍然无法唯一确认，例如同部门也有两个“高流”，结果标记为 `ambiguous`，不会生成可发送对象，需要人工确认。
+
+默认目标部门：
+
+```bash
+SALES_TARGET_DEPARTMENT=服务零售KA——丽人
+```
+
 ### 本地 CSV 查询
 
 默认使用本地 CSV 映射表：
@@ -252,6 +268,8 @@ Content-Type: application/json
 ```bash
 MERCHANT_BD_LOOKUP_PROVIDER=csv
 MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
+SALES_CONTACT_DIRECTORY_CSV=examples/sales_contact_directory.csv
+SALES_TARGET_DEPARTMENT=服务零售KA——丽人
 ```
 
 CSV 示例：
@@ -271,6 +289,16 @@ CSV 示例：
 | `bd_id` | BD 内部 ID |
 | `contact_id` | 消息平台用户 ID，例如飞书 `open_id` 或 `user_id` |
 | `group` | BD 分组或区域 |
+
+销售通讯录 CSV 示例：
+
+```csv
+销售名称_最新,bd_id,contact_id,所属部门
+高流,bd_gaoliu,ou_xxx,服务零售KA——丽人
+高流,bd_gaoliu_other,ou_yyy,服务零售KA——到综
+```
+
+`销售名称_最新` 用来匹配风神结果里的销售姓名；`所属部门` 用来处理重名；`contact_id` 是飞书可发送 ID。
 
 ### 风神查询
 
@@ -657,6 +685,8 @@ FENGSHEN_CLIENT_ID_FIELD=clientId
 FENGSHEN_CLIENT_SECRET_FIELD=clientSecret
 FENGSHEN_SCOPE=
 FENGSHEN_TIMEOUT_SECONDS=10
+SALES_CONTACT_DIRECTORY_CSV=examples/sales_contact_directory.csv
+SALES_TARGET_DEPARTMENT=服务零售KA——丽人
 
 DEFAULT_FIRST_REMIND_AFTER_MINUTES=120
 DEFAULT_REMIND_INTERVAL_MINUTES=180

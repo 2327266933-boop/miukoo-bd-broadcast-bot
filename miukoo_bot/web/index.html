@@ -905,13 +905,29 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
     `).join("");
   }
 
+  function lookupMatchText(match, fallbackMessage) {
+    if (!match) {
+      return fallbackMessage || "-";
+    }
+    const resolution = match.sales_resolution || {};
+    const salesName = match.sales_name || match.name || "-";
+    const department = match.department || (resolution.selected && resolution.selected.department) || "";
+    if (resolution.status === "ambiguous") {
+      const candidates = (resolution.candidates || []).map((candidate) => {
+        return `${candidate.name || "-"} / ${candidate.department || "无部门"} / ${candidate.contact_id || "无飞书ID"}`;
+      }).join("；");
+      return `销售：${salesName} / 重名待确认：${candidates}`;
+    }
+    const duplicateNote = resolution.duplicate_name ? " / 有重名，已按部门命中" : "";
+    const departmentText = department ? ` / 部门：${department}` : "";
+    return `销售：${salesName} / ID：${match.bd_id || "-"} / 飞书：${match.contact_id || "缺少"}${departmentText}${duplicateNote}`;
+  }
+
   function renderLookupResults(data) {
     const summary = `来源：${data.source} · 命中 ${data.matched_count} · 多匹配 ${data.ambiguous_count} · 未找到 ${data.unmatched_count}`;
     const rows = (data.results || []).map((result) => {
       const match = result.matches && result.matches[0];
-      const bdText = match
-        ? `销售：${match.sales_name || match.name || "-"} / ID：${match.bd_id || "-"} / 飞书：${match.contact_id || "缺少"}`
-        : result.message || "-";
+      const bdText = lookupMatchText(match, result.message);
       return `
         <div class="lookup-result-row">
           <span>${escapeHtml(result.merchant_name)}</span>

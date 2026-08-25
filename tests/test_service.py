@@ -101,6 +101,8 @@ class BotServiceTest(unittest.TestCase):
             fengshen_client_secret_field="clientSecret",
             fengshen_scope=None,
             fengshen_timeout_seconds=10,
+            sales_contact_directory_csv=None,
+            sales_target_department="服务零售KA——丽人",
         )
         self.store = SQLiteStore(self.settings.database_path)
         self.store.init_db()
@@ -231,6 +233,8 @@ class BotServiceTest(unittest.TestCase):
             fengshen_client_secret_field=self.settings.fengshen_client_secret_field,
             fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
+            sales_contact_directory_csv=self.settings.sales_contact_directory_csv,
+            sales_target_department=self.settings.sales_target_department,
         )
         self.service = BotService(
             store=self.store,
@@ -309,6 +313,86 @@ class BotServiceTest(unittest.TestCase):
             result["recipients"][0]["variables"]["merchant_names"],
             "杭州沐暮子科技有限公司",
         )
+
+    def test_lookup_resolves_duplicate_sales_name_by_target_department(self):
+        merchant_csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        merchant_csv_path.write_text(
+            "总户商家名称,销售名称_最新,group\n"
+            "杭州沐暮子科技有限公司,高流,华东一区\n",
+            encoding="utf-8",
+        )
+        sales_csv_path = Path(self.tmpdir.name) / "sales_contact_directory.csv"
+        sales_csv_path.write_text(
+            "销售名称_最新,bd_id,contact_id,所属部门\n"
+            "高流,bd_gaoliu,mock_user_gaoliu,服务零售KA——丽人\n"
+            "高流,bd_other,mock_user_other,服务零售KA——到综\n",
+            encoding="utf-8",
+        )
+        self.settings = replace(
+            self.settings,
+            merchant_bd_mapping_csv=str(merchant_csv_path),
+            sales_contact_directory_csv=str(sales_csv_path),
+            sales_target_department="服务零售KA——丽人",
+        )
+        self.service = BotService(
+            store=self.store,
+            templates=TemplateStore(),
+            adapter=self.adapter,
+            settings=self.settings,
+            clock=self.clock,
+        )
+
+        result = self.service.lookup_merchant_bds({"text": "沐暮子"})
+        match = result["results"][0]["matches"][0]
+
+        self.assertEqual(result["results"][0]["status"], "matched")
+        self.assertEqual(match["sales_name"], "高流")
+        self.assertEqual(match["contact_id"], "mock_user_gaoliu")
+        self.assertEqual(match["department"], "服务零售KA——丽人")
+        self.assertTrue(match["sales_resolution"]["duplicate_name"])
+        self.assertEqual(
+            match["sales_resolution"]["status"],
+            "resolved_by_department",
+        )
+        self.assertEqual(len(match["sales_resolution"]["candidates"]), 2)
+        self.assertEqual(result["recipient_count"], 1)
+
+    def test_lookup_marks_duplicate_sales_name_when_department_not_unique(self):
+        merchant_csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        merchant_csv_path.write_text(
+            "总户商家名称,销售名称_最新,group\n"
+            "杭州沐暮子科技有限公司,高流,华东一区\n",
+            encoding="utf-8",
+        )
+        sales_csv_path = Path(self.tmpdir.name) / "sales_contact_directory.csv"
+        sales_csv_path.write_text(
+            "销售名称_最新,bd_id,contact_id,所属部门\n"
+            "高流,bd_gaoliu_1,mock_user_1,服务零售KA——丽人\n"
+            "高流,bd_gaoliu_2,mock_user_2,服务零售KA——丽人\n",
+            encoding="utf-8",
+        )
+        self.settings = replace(
+            self.settings,
+            merchant_bd_mapping_csv=str(merchant_csv_path),
+            sales_contact_directory_csv=str(sales_csv_path),
+            sales_target_department="服务零售KA——丽人",
+        )
+        self.service = BotService(
+            store=self.store,
+            templates=TemplateStore(),
+            adapter=self.adapter,
+            settings=self.settings,
+            clock=self.clock,
+        )
+
+        result = self.service.lookup_merchant_bds({"text": "沐暮子"})
+        match = result["results"][0]["matches"][0]
+
+        self.assertEqual(result["results"][0]["status"], "ambiguous")
+        self.assertEqual(match["sales_resolution"]["status"], "ambiguous")
+        self.assertTrue(match["sales_resolution"]["duplicate_name"])
+        self.assertEqual(len(match["sales_resolution"]["candidates"]), 2)
+        self.assertEqual(result["recipient_count"], 0)
 
     def test_lookup_recipients_can_render_merchant_follow_up_template(self):
         csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
@@ -568,6 +652,8 @@ class BotServiceTest(unittest.TestCase):
             fengshen_client_secret_field=self.settings.fengshen_client_secret_field,
             fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
+            sales_contact_directory_csv=self.settings.sales_contact_directory_csv,
+            sales_target_department=self.settings.sales_target_department,
         )
         self.service = BotService(
             store=self.store,

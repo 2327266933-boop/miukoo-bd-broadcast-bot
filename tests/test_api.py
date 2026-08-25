@@ -93,6 +93,8 @@ class APITest(unittest.TestCase):
             fengshen_client_secret_field="clientSecret",
             fengshen_scope=None,
             fengshen_timeout_seconds=10,
+            sales_contact_directory_csv=None,
+            sales_target_department="服务零售KA——丽人",
         )
         store = SQLiteStore(self.settings.database_path)
         store.init_db()

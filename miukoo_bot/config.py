@@ -34,6 +34,8 @@ class Settings:
     fengshen_client_secret_field: str
     fengshen_scope: Optional[str]
     fengshen_timeout_seconds: int
+    sales_contact_directory_csv: Optional[str]
+    sales_target_department: Optional[str]
 
 
 def load_settings() -> Settings:
@@ -87,4 +89,12 @@ def load_settings() -> Settings:
         ),
         fengshen_scope=os.environ.get("FENGSHEN_SCOPE"),
         fengshen_timeout_seconds=int(os.environ.get("FENGSHEN_TIMEOUT_SECONDS", "10")),
+        sales_contact_directory_csv=os.environ.get(
+            "SALES_CONTACT_DIRECTORY_CSV",
+            "examples/sales_contact_directory.csv",
+        ),
+        sales_target_department=os.environ.get(
+            "SALES_TARGET_DEPARTMENT",
+            "服务零售KA——丽人",
+        ),
     )
