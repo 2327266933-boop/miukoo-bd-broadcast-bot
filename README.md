@@ -48,6 +48,7 @@
 - 飞书/Lark 发送适配器：后续配置密钥后可调用飞书消息 API。
 - 飞书事件回调：支持 URL 校验和 `im.message.receive_v1` 用户消息事件。
 - CSV 导入：支持从表格导出的 CSV 创建收件人名单。
+- 单人自定义话术：同一个任务里，每个 BD 可以用自己的首发和提醒文案。
 - 任务预览：正式发送前可预览每个 BD 实际收到的消息。
 - Web 工作台：通过浏览器操作群发任务和回复整理。
 - 商家查 BD：支持本地 CSV 映射和风神 HTTP 查询两种来源。
@@ -169,12 +170,12 @@ python3 -m unittest discover -s tests -v
 
 ### CSV 导入
 
-CSV 文件示例见 `examples/recipients.inventory.csv`：
+CSV 文件示例见 `examples/recipients.inventory.csv`。如果不同 BD 要发不同内容，直接加 `custom_message` 和 `custom_follow_up_message` 两列：
 
 ```csv
-bd_id,name,contact_id,group,city,shop_count,deadline
-bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00
-bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00
+bd_id,name,contact_id,group,city,shop_count,deadline,custom_message,custom_follow_up_message
+bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00,"张三，麻烦今天 18:00 前确认上海 12 家门店库存，有异常直接回我。","张三，上海库存确认还没收到反馈，麻烦同步一下进展。"
+bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00,"李四，广州这 8 家门店今天重点看晚高峰备货，处理完回我结果。","李四，晚高峰备货确认还没收到回复，有进展直接回我。"
 ```
 
 创建任务时使用 `recipients_csv_path`：
@@ -196,6 +197,18 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00
 
 固定字段包括 `bd_id`、`name`、`contact_id`、`mobile`、`group`、`variables_json`。其他列会自动作为模板变量；以 `variable_` 开头的列会去掉前缀后作为变量名。
 
+话术优先级：
+
+- `custom_message`：有值时，首发消息直接使用这一列。
+- `custom_follow_up_message`：有值时，提醒消息直接使用这一列。
+- 如果这两列为空，才使用 `message_type` 对应的统一模板。
+
+自定义话术也支持变量，例如：
+
+```text
+Hi {name}，请跟进 {merchant_names}，今天下班前回我。
+```
+
 ## Web 工作台
 
 本地启动服务后打开：
@@ -209,6 +222,7 @@ http://127.0.0.1:8080/workbench
 - 创建群发任务：填写任务名称、发送渠道、消息类型、提醒策略和 BD 名单。
 - 商家查 BD：输入商家名称，查询负责人，并一键填入 BD 名单。
 - CSV 名单录入：直接粘贴从表格导出的 CSV。
+- 单人话术：在 CSV 中加 `custom_message`、`custom_follow_up_message`，即可让不同 BD 收到不同内容。
 - JSON 名单录入：适合从系统接口或脚本生成名单。
 - 消息预览：正式发送前查看每个 BD 会收到的首发和提醒文案。
 - 任务列表：查看任务状态、BD 数量、回复数和失败数。

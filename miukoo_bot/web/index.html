@@ -78,6 +78,7 @@
       <label id="csvInputWrap" class="block-label">
         <span>BD名单 CSV</span>
         <textarea id="csvInput" spellcheck="false"></textarea>
+        <span class="muted">可选列：custom_message 覆盖首发话术，custom_follow_up_message 覆盖提醒话术。</span>
       </label>
 
       <label id="jsonInputWrap" class="block-label hidden">
@@ -636,9 +637,9 @@
 </style>
 
 <script>
-  const sampleCsv = `bd_id,name,contact_id,group,city,shop_count,deadline
-bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00
-bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
+  const sampleCsv = `bd_id,name,contact_id,group,city,shop_count,deadline,custom_message,custom_follow_up_message
+bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00,"张三，麻烦今天 18:00 前确认上海 12 家门店库存，有异常直接回我。","张三，上海库存确认还没收到反馈，麻烦同步一下进展。"
+bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00,"李四，广州这 8 家门店今天重点看晚高峰备货，处理完回我结果。","李四，晚高峰备货确认还没收到回复，有进展直接回我。"`;
 
   const sampleJson = JSON.stringify([
     {
@@ -649,7 +650,9 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
       variables: {
         city: "上海",
         shop_count: 12,
-        deadline: "今天 18:00"
+        deadline: "今天 18:00",
+        custom_message: "张三，麻烦今天 18:00 前确认上海 12 家门店库存，有异常直接回我。",
+        custom_follow_up_message: "张三，上海库存确认还没收到反馈，麻烦同步一下进展。"
       }
     },
     {
@@ -660,7 +663,9 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
       variables: {
         city: "广州",
         shop_count: 8,
-        deadline: "今天 18:00"
+        deadline: "今天 18:00",
+        custom_message: "李四，广州这 8 家门店今天重点看晚高峰备货，处理完回我结果。",
+        custom_follow_up_message: "李四，晚高峰备货确认还没收到回复，有进展直接回我。"
       }
     }
   ], null, 2);
@@ -860,7 +865,9 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
       "contact_id",
       "group",
       "merchant_names",
-      "merchant_count"
+      "merchant_count",
+      "custom_message",
+      "custom_follow_up_message"
     ];
     const rows = recipients.map((recipient) => {
       const variables = recipient.variables || {};
@@ -870,7 +877,9 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
         recipient.contact_id,
         recipient.group || "",
         variables.merchant_names || "",
-        variables.merchant_count || ""
+        variables.merchant_count || "",
+        variables.custom_message || "",
+        variables.custom_follow_up_message || ""
       ].map(toCsvValue).join(",");
     });
     return [headers.join(","), ...rows].join("\n");

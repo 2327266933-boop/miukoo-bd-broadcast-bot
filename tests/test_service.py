@@ -178,11 +178,74 @@ class BotServiceTest(unittest.TestCase):
         self.assertEqual(len(self.adapter.sent), 0)
         self.assertEqual(self.service.list_tasks(), [])
 
+    def test_per_recipient_custom_messages_override_shared_template(self):
+        payload = build_payload()
+        payload["recipients"] = [
+            {
+                "bd_id": "bd_001",
+                "name": "张三",
+                "contact_id": "mock_user_001",
+                "variables": {
+                    "custom_message": "张三，今天重点确认上海门店库存。",
+                    "custom_follow_up_message": "张三，上海库存结果还没收到，麻烦回一下。",
+                },
+            },
+            {
+                "bd_id": "bd_002",
+                "name": "李四",
+                "contact_id": "mock_user_002",
+                "variables": {
+                    "custom_message": "李四，广州门店先看晚高峰备货。",
+                    "custom_follow_up_message": "李四，广州备货反馈还没收到，麻烦同步。",
+                },
+            },
+        ]
+
+        preview = self.service.preview_task(payload)
+        task = self.service.create_task(payload)
+        self.service.process_follow_ups()
+
+        self.assertEqual(preview["recipients"][0]["messages"]["initial"], "张三，今天重点确认上海门店库存。")
+        self.assertEqual(preview["recipients"][1]["messages"]["initial"], "李四，广州门店先看晚高峰备货。")
+        self.assertEqual(self.adapter.sent[0]["content"], "张三，今天重点确认上海门店库存。")
+        self.assertEqual(self.adapter.sent[1]["content"], "李四，广州门店先看晚高峰备货。")
+        self.assertEqual(self.adapter.sent[2]["content"], "张三，上海库存结果还没收到，麻烦回一下。")
+        self.assertEqual(self.adapter.sent[3]["content"], "李四，广州备货反馈还没收到，麻烦同步。")
+        self.assertEqual(task["recipients"][0]["status"], "sent")
+
+    def test_custom_message_can_use_recipient_variables(self):
+        payload = build_payload()
+        payload["recipients"] = [
+            {
+                "bd_id": "bd_001",
+                "name": "张三",
+                "contact_id": "mock_user_001",
+                "custom_message": "{name}，请优先处理 {city} 的 {shop_count} 家门店。",
+                "custom_follow_up_message": "{name}，{city} 门店还没反馈。",
+                "variables": {
+                    "city": "上海",
+                    "shop_count": 12,
+                },
+            }
+        ]
+
+        preview = self.service.preview_task(payload)
+
+        self.assertEqual(
+            preview["recipients"][0]["messages"]["initial"],
+            "张三，请优先处理 上海 的 12 家门店。",
+        )
+        self.assertEqual(
+            preview["recipients"][0]["messages"]["follow_up"],
+            "张三，上海 门店还没反馈。",
+        )
+
     def test_create_task_can_load_recipients_from_csv(self):
         csv_path = Path(self.tmpdir.name) / "recipients.csv"
         csv_path.write_text(
-            "bd_id,name,contact_id,group,city,shop_count,deadline\n"
-            "bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00\n",
+            "bd_id,name,contact_id,group,city,shop_count,deadline,custom_message\n"
+            "bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00,"
+            "\"张三，这条是 CSV 单独话术。\"\n",
             encoding="utf-8",
         )
         payload = build_payload()
@@ -193,6 +256,7 @@ class BotServiceTest(unittest.TestCase):
 
         self.assertEqual(len(task["recipients"]), 1)
         self.assertEqual(task["recipients"][0]["variables"]["city"], "上海")
+        self.assertEqual(self.adapter.sent[0]["content"], "张三，这条是 CSV 单独话术。")
         self.assertEqual(len(self.adapter.sent), 1)
 
     def test_stop_recipient_cancels_future_follow_up(self):

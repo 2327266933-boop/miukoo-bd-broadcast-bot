@@ -1,5 +1,6 @@
 import csv
 import io
+import string
 import uuid
 from datetime import timedelta
 from typing import Any, Callable, Dict, List
@@ -29,6 +30,28 @@ class NotFoundError(LookupError):
 
 class RateLimitError(RuntimeError):
     pass
+
+
+CUSTOM_MESSAGE_FIELDS = {
+    "initial": (
+        "custom_message",
+        "initial_message",
+        "message",
+        "首发消息",
+        "首发话术",
+        "自定义消息",
+        "消息内容",
+    ),
+    "follow_up": (
+        "custom_follow_up_message",
+        "follow_up_message",
+        "reminder_message",
+        "remind_message",
+        "提醒消息",
+        "提醒话术",
+        "催办消息",
+    ),
+}
 
 
 class BotService:
@@ -106,15 +129,14 @@ class BotService:
 
         preview_recipients = []
         for recipient in recipients:
-            variables = self._message_variables(recipient)
             messages = {
-                "initial": self.templates.render(message_type, "initial", variables),
+                "initial": self._render_message(message_type, "initial", recipient),
             }
             if follow_up["enabled"]:
-                messages["follow_up"] = self.templates.render(
+                messages["follow_up"] = self._render_message(
                     message_type,
                     "follow_up",
-                    variables,
+                    recipient,
                 )
             preview_recipients.append(
                 {
@@ -362,8 +384,7 @@ class BotService:
         now: Any,
     ) -> None:
         self._ensure_contact_daily_limit(recipient["contact_id"], now)
-        variables = self._message_variables(recipient)
-        content = self.templates.render(task["message_type"], "initial", variables)
+        content = self._render_message(task["message_type"], "initial", recipient)
         result = self.adapter.send(
             task["channel"],
             recipient["contact_id"],
@@ -408,11 +429,10 @@ class BotService:
 
     def _send_follow_up(self, recipient: Dict[str, Any], now: Any) -> None:
         self._ensure_contact_daily_limit(recipient["contact_id"], now)
-        variables = self._message_variables(recipient)
-        content = self.templates.render(
+        content = self._render_message(
             recipient["message_type"],
             "follow_up",
-            variables,
+            recipient,
         )
         result = self.adapter.send(
             recipient["channel"],
@@ -543,6 +563,7 @@ class BotService:
             name = raw.get("name") or str(bd_id)
             contact_id = raw.get("contact_id") or raw.get("mobile") or str(bd_id)
             variables = dict(raw.get("variables") or {})
+            self._copy_custom_messages_to_variables(raw, variables)
             variables.update(
                 {
                     "name": name,
@@ -592,6 +613,10 @@ class BotService:
             kinds.append("follow_up")
 
         for kind in kinds:
+            custom_template = self._custom_message_template(kind, variables)
+            if custom_template:
+                self._validate_custom_message(kind, custom_template, variables)
+                continue
             required = self.templates.required_variables(message_type, kind)
             missing = sorted(name for name in required if name not in variables)
             if missing:
@@ -602,6 +627,91 @@ class BotService:
                         ", ".join(missing),
                     )
                 )
+
+    def _copy_custom_messages_to_variables(
+        self,
+        raw: Dict[str, Any],
+        variables: Dict[str, Any],
+    ) -> None:
+        for field_names in CUSTOM_MESSAGE_FIELDS.values():
+            for field_name in field_names:
+                if field_name in raw and raw[field_name] not in ("", None):
+                    variables[field_name] = raw[field_name]
+
+    def _render_message(
+        self,
+        message_type: str,
+        message_kind: str,
+        recipient: Dict[str, Any],
+    ) -> str:
+        variables = self._message_variables(recipient)
+        custom_template = self._custom_message_template(message_kind, variables)
+        if custom_template:
+            return self._render_custom_message(message_kind, custom_template, variables)
+        return self.templates.render(message_type, message_kind, variables)
+
+    def _custom_message_template(
+        self,
+        message_kind: str,
+        variables: Dict[str, Any],
+    ) -> str:
+        for field_name in CUSTOM_MESSAGE_FIELDS[message_kind]:
+            value = variables.get(field_name)
+            if value not in ("", None):
+                return str(value)
+        return ""
+
+    def _validate_custom_message(
+        self,
+        message_kind: str,
+        template: str,
+        variables: Dict[str, Any],
+    ) -> None:
+        formatter = string.Formatter()
+        try:
+            required = {
+                field_name
+                for _, field_name, _, _ in formatter.parse(template)
+                if field_name
+            }
+        except ValueError as exc:
+            raise ValidationError(
+                "Invalid custom {} message template: {}".format(
+                    message_kind,
+                    exc,
+                )
+            ) from exc
+        missing = sorted(name for name in required if name not in variables)
+        if missing:
+            raise ValidationError(
+                "Missing variables for custom {} message: {}".format(
+                    message_kind,
+                    ", ".join(missing),
+                )
+            )
+
+    def _render_custom_message(
+        self,
+        message_kind: str,
+        template: str,
+        variables: Dict[str, Any],
+    ) -> str:
+        try:
+            return template.format(**variables)
+        except KeyError as exc:
+            raise ValidationError(
+                "Missing variables for custom {} message: {}".format(
+                    message_kind,
+                    exc.args[0],
+                )
+            ) from exc
+        except ValueError as exc:
+            raise ValidationError(
+                "Invalid custom {} message template: {}".format(
+                    message_kind,
+                    exc,
+                )
+            ) from exc
 
     def _message_variables(self, recipient: Dict[str, Any]) -> Dict[str, Any]:
         variables = dict(recipient.get("variables") or {})
