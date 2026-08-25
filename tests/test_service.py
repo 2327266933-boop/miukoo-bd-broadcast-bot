@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -86,6 +87,11 @@ class BotServiceTest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=None,
             lark_receive_id_type="open_id",
+            merchant_bd_lookup_provider="csv",
+            merchant_bd_mapping_csv=None,
+            fengshen_merchant_bd_lookup_url=None,
+            fengshen_api_token=None,
+            fengshen_timeout_seconds=10,
         )
         self.store = SQLiteStore(self.settings.database_path)
         self.store.init_db()
@@ -205,6 +211,11 @@ class BotServiceTest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=None,
             lark_receive_id_type="open_id",
+            merchant_bd_lookup_provider=self.settings.merchant_bd_lookup_provider,
+            merchant_bd_mapping_csv=self.settings.merchant_bd_mapping_csv,
+            fengshen_merchant_bd_lookup_url=self.settings.fengshen_merchant_bd_lookup_url,
+            fengshen_api_token=self.settings.fengshen_api_token,
+            fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
         )
         self.service = BotService(
             store=self.store,
@@ -222,6 +233,66 @@ class BotServiceTest(unittest.TestCase):
         self.assertEqual(second["recipients"][0]["status"], "failed")
         self.assertIn("Daily message limit", second["recipients"][0]["failure_reason"])
         self.assertEqual(len(self.adapter.sent), 1)
+
+    def test_lookup_merchant_bds_from_csv_groups_recipients(self):
+        csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        csv_path.write_text(
+            "merchant_name,bd_id,name,contact_id,group,city\n"
+            "上海悦来火锅,bd_001,张三,mock_user_001,华东一区,上海\n"
+            "上海云亭烤肉,bd_001,张三,mock_user_001,华东一区,上海\n"
+            "广州花城茶餐厅,bd_002,李四,mock_user_002,华南二区,广州\n",
+            encoding="utf-8",
+        )
+        self.settings = replace(self.settings, merchant_bd_mapping_csv=str(csv_path))
+        self.service = BotService(
+            store=self.store,
+            templates=TemplateStore(),
+            adapter=self.adapter,
+            settings=self.settings,
+            clock=self.clock,
+        )
+
+        result = self.service.lookup_merchant_bds(
+            {"merchant_names": ["上海悦来火锅", "上海云亭烤肉", "不存在商家"]}
+        )
+
+        self.assertEqual(result["source"], "csv")
+        self.assertEqual(result["matched_count"], 2)
+        self.assertEqual(result["unmatched_count"], 1)
+        self.assertEqual(result["recipient_count"], 1)
+        self.assertEqual(result["recipients"][0]["bd_id"], "bd_001")
+        self.assertEqual(result["recipients"][0]["variables"]["merchant_count"], 2)
+        self.assertIn("上海悦来火锅", result["recipients"][0]["variables"]["merchant_names"])
+
+    def test_lookup_recipients_can_render_merchant_follow_up_template(self):
+        csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        csv_path.write_text(
+            "merchant_name,bd_id,name,contact_id,group\n"
+            "上海悦来火锅,bd_001,张三,mock_user_001,华东一区\n",
+            encoding="utf-8",
+        )
+        self.settings = replace(self.settings, merchant_bd_mapping_csv=str(csv_path))
+        self.service = BotService(
+            store=self.store,
+            templates=TemplateStore(),
+            adapter=self.adapter,
+            settings=self.settings,
+            clock=self.clock,
+        )
+        lookup = self.service.lookup_merchant_bds({"text": "上海悦来火锅"})
+
+        preview = self.service.preview_task(
+            {
+                "task_name": "商家跟进",
+                "channel": "mock",
+                "message_type": "merchant_follow_up",
+                "recipients": lookup["recipients"],
+                "follow_up": {"enabled": True},
+            }
+        )
+
+        self.assertIn("上海悦来火锅", preview["recipients"][0]["messages"]["initial"])
+        self.assertIn("1 个商家", preview["recipients"][0]["messages"]["initial"])
 
     def test_lark_url_verification_returns_challenge(self):
         self._set_lark_token("verify-token")
@@ -340,6 +411,11 @@ class BotServiceTest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=token,
             lark_receive_id_type="open_id",
+            merchant_bd_lookup_provider=self.settings.merchant_bd_lookup_provider,
+            merchant_bd_mapping_csv=self.settings.merchant_bd_mapping_csv,
+            fengshen_merchant_bd_lookup_url=self.settings.fengshen_merchant_bd_lookup_url,
+            fengshen_api_token=self.settings.fengshen_api_token,
+            fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
         )
         self.service = BotService(
             store=self.store,

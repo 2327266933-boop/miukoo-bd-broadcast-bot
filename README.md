@@ -11,6 +11,7 @@
 - 支持检测收件人是否回复；未回复时按配置间隔自动提醒。
 - 支持发送记录、回复记录、提醒记录可追踪，避免重复轰炸和不可审计。
 - 支持运营工作台查看每个 BD 的触达、提醒、回复和失败原因。
+- 支持输入商家名称查询对应 BD，并将查询结果转成群发名单。
 - 支持基础频控、黑名单、免打扰时段，保证内部沟通合规。
 
 ## 核心流程
@@ -49,11 +50,12 @@
 - CSV 导入：支持从表格导出的 CSV 创建收件人名单。
 - 任务预览：正式发送前可预览每个 BD 实际收到的消息。
 - Web 工作台：通过浏览器操作群发任务和回复整理。
+- 商家查 BD：支持本地 CSV 映射和风神 HTTP 查询两种来源。
 - 单人停催：支持对某个收件人停止后续提醒。
 - 回复导出：支持导出每个 BD 的回复状态和最近回复内容。
 - 基础频控：默认同一 `contact_id` 24 小时最多发送 3 条。
 - 后台提醒线程：定时扫描未回复对象，到点后自动提醒。
-- 单元测试：覆盖首发、提醒、回复停止提醒、模板变量校验、CSV、预览、停催、频控。
+- 单元测试：覆盖首发、提醒、回复停止提醒、模板变量校验、CSV、预览、停催、频控、工作台页面、回复导出和商家查 BD。
 
 ### 目录结构
 
@@ -62,6 +64,7 @@
 ├── .env.example
 ├── README.md
 ├── examples/
+│   ├── merchant_bd_mapping.csv
 │   ├── recipients.inventory.csv
 │   └── task.inventory.json
 ├── miukoo_bot/
@@ -79,6 +82,7 @@
 │       └── index.html
 ├── pyproject.toml
 └── tests/
+    ├── test_api.py
     └── test_service.py
 ```
 
@@ -202,6 +206,7 @@ http://127.0.0.1:8080/workbench
 工作台支持：
 
 - 创建群发任务：填写任务名称、发送渠道、消息类型、提醒策略和 BD 名单。
+- 商家查 BD：输入商家名称，查询负责人，并一键填入 BD 名单。
 - CSV 名单录入：直接粘贴从表格导出的 CSV。
 - JSON 名单录入：适合从系统接口或脚本生成名单。
 - 消息预览：正式发送前查看每个 BD 会收到的首发和提醒文案。
@@ -211,6 +216,99 @@ http://127.0.0.1:8080/workbench
 - 导出 CSV：下载任务下所有 BD 的回复整理结果。
 
 页面中的“创建并发送”会真实调用当前服务的 `/api/tasks`。如果当前 `channel=lark` 且环境变量已配置飞书密钥，会真实发送飞书消息；测试时建议先使用 `channel=mock`。
+
+## 商家名称查询 BD
+
+工作台里可以先输入商家名称，查询对应 BD，再把结果填入群发名单。查询接口：
+
+```http
+POST /api/merchant-bd/lookup
+Content-Type: application/json
+```
+
+```json
+{
+  "merchant_names": [
+    "上海悦来火锅",
+    "广州花城茶餐厅"
+  ]
+}
+```
+
+返回里会包含：
+
+- `results`：每个商家的查询结果，状态包括 `matched`、`ambiguous`、`not_found`。
+- `recipients`：已匹配且可直接群发的 BD 收件人列表；同一个 BD 负责多个商家时会自动合并。
+- `recipient_count`：最终生成的 BD 收件人数。
+
+### 本地 CSV 查询
+
+默认使用本地 CSV 映射表：
+
+```bash
+MERCHANT_BD_LOOKUP_PROVIDER=csv
+MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
+```
+
+CSV 示例：
+
+```csv
+merchant_name,bd_id,name,contact_id,group,city
+上海悦来火锅,bd_001,张三,mock_user_001,华东一区,上海
+广州花城茶餐厅,bd_002,李四,mock_user_002,华南二区,广州
+```
+
+字段说明：
+
+| 字段 | 说明 |
+| --- | --- |
+| `merchant_name` | 商家名称 |
+| `bd_id` | BD 内部 ID |
+| `name` | BD 姓名 |
+| `contact_id` | 消息平台用户 ID，例如飞书 `open_id` 或 `user_id` |
+| `group` | BD 分组或区域 |
+
+### 风神查询
+
+如果要接风神，把查询来源改成 `fengshen`：
+
+```bash
+MERCHANT_BD_LOOKUP_PROVIDER=fengshen
+FENGSHEN_MERCHANT_BD_LOOKUP_URL=https://your-fengshen-endpoint
+FENGSHEN_API_TOKEN=your-token
+FENGSHEN_TIMEOUT_SECONDS=10
+```
+
+当前服务会向风神地址发送：
+
+```json
+{
+  "merchant_names": ["上海悦来火锅"]
+}
+```
+
+推荐风神返回结构：
+
+```json
+{
+  "results": [
+    {
+      "merchant_name": "上海悦来火锅",
+      "matches": [
+        {
+          "merchant_name": "上海悦来火锅",
+          "bd_id": "bd_001",
+          "name": "张三",
+          "contact_id": "ou_xxx",
+          "group": "华东一区"
+        }
+      ]
+    }
+  ]
+}
+```
+
+如果风神实际字段名不同，可以在 `miukoo_bot/merchant_lookup.py` 的字段别名里补充。
 
 ## 非目标
 
@@ -283,6 +381,7 @@ Hi {name}，刚才的库存确认还没有收到回复。
 | `campaign_signup` | 活动报名提醒 | `campaign_name`、`signup_deadline`、`benefit` |
 | `material_collect` | 资料补充 | `material_name`、`missing_fields`、`deadline` |
 | `task_urge` | 通用任务催办 | `task_title`、`owner_name`、`deadline` |
+| `merchant_follow_up` | 商家跟进 | `merchant_names`、`merchant_count` |
 
 ## 状态机
 
@@ -446,6 +545,12 @@ GET /api/tasks/{task_id}
 POST /api/tasks/preview
 ```
 
+### 商家名称查询 BD
+
+```http
+POST /api/merchant-bd/lookup
+```
+
 ### 导出回复整理
 
 ```http
@@ -495,6 +600,12 @@ LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
 LARK_VERIFICATION_TOKEN=xxx
 LARK_RECEIVE_ID_TYPE=open_id
+
+MERCHANT_BD_LOOKUP_PROVIDER=csv
+MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
+FENGSHEN_MERCHANT_BD_LOOKUP_URL=
+FENGSHEN_API_TOKEN=
+FENGSHEN_TIMEOUT_SECONDS=10
 
 DEFAULT_FIRST_REMIND_AFTER_MINUTES=120
 DEFAULT_REMIND_INTERVAL_MINUTES=180

@@ -57,6 +57,19 @@
         </label>
       </div>
 
+      <div class="lookup-section">
+        <div class="lookup-header">
+          <strong>商家查 BD</strong>
+          <span class="muted">输入商家名称，查询负责人并生成群发名单</span>
+        </div>
+        <textarea id="merchantNamesInput" class="compact-textarea" spellcheck="false" placeholder="上海悦来火锅&#10;广州花城茶餐厅"></textarea>
+        <div class="button-row">
+          <button id="lookupMerchantBtn" type="button" class="secondary">查询BD</button>
+          <button id="useLookupBtn" type="button" class="secondary" disabled>填入名单</button>
+        </div>
+        <div id="lookupResults" class="lookup-results muted">暂无查询结果</div>
+      </div>
+
       <div class="segmented" role="tablist">
         <button id="csvModeBtn" class="active" type="button">CSV名单</button>
         <button id="jsonModeBtn" type="button">JSON名单</button>
@@ -405,6 +418,43 @@
     justify-content: flex-end;
   }
 
+  .lookup-section {
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    margin: 14px 0;
+    padding: 14px 0;
+  }
+
+  .lookup-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .compact-textarea {
+    min-height: 86px;
+  }
+
+  .lookup-results {
+    margin-top: 10px;
+    max-height: 180px;
+    overflow: auto;
+  }
+
+  .lookup-result-row {
+    display: grid;
+    grid-template-columns: minmax(100px, 1.1fr) minmax(120px, 1fr) 88px;
+    gap: 8px;
+    padding: 7px 0;
+    border-top: 1px solid #edf1f5;
+  }
+
+  .lookup-result-row:first-child {
+    border-top: 0;
+  }
+
   .compact {
     margin-top: 0;
   }
@@ -618,7 +668,8 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
   const state = {
     mode: "csv",
     tasks: [],
-    selectedTask: null
+    selectedTask: null,
+    lookupRecipients: []
   };
 
   const els = {
@@ -633,6 +684,10 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
     maxReminders: document.getElementById("maxReminders"),
     quietStart: document.getElementById("quietStart"),
     quietEnd: document.getElementById("quietEnd"),
+    merchantNamesInput: document.getElementById("merchantNamesInput"),
+    lookupMerchantBtn: document.getElementById("lookupMerchantBtn"),
+    useLookupBtn: document.getElementById("useLookupBtn"),
+    lookupResults: document.getElementById("lookupResults"),
     csvModeBtn: document.getElementById("csvModeBtn"),
     jsonModeBtn: document.getElementById("jsonModeBtn"),
     csvInputWrap: document.getElementById("csvInputWrap"),
@@ -790,6 +845,37 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
     };
   }
 
+  function toCsvValue(value) {
+    const text = String(value ?? "");
+    if (/[",\n\r]/.test(text)) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  }
+
+  function lookupRecipientsToCsv(recipients) {
+    const headers = [
+      "bd_id",
+      "name",
+      "contact_id",
+      "group",
+      "merchant_names",
+      "merchant_count"
+    ];
+    const rows = recipients.map((recipient) => {
+      const variables = recipient.variables || {};
+      return [
+        recipient.bd_id,
+        recipient.name,
+        recipient.contact_id,
+        recipient.group || "",
+        variables.merchant_names || "",
+        variables.merchant_count || ""
+      ].map(toCsvValue).join(",");
+    });
+    return [headers.join(","), ...rows].join("\n");
+  }
+
   function showNotice(message, isError = false) {
     els.notice.textContent = message;
     els.notice.classList.toggle("error", isError);
@@ -817,6 +903,25 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
         ${recipient.messages.follow_up ? `<div class="message-box">${escapeHtml(recipient.messages.follow_up)}</div>` : ""}
       </div>
     `).join("");
+  }
+
+  function renderLookupResults(data) {
+    const summary = `来源：${data.source} · 命中 ${data.matched_count} · 多匹配 ${data.ambiguous_count} · 未找到 ${data.unmatched_count}`;
+    const rows = (data.results || []).map((result) => {
+      const match = result.matches && result.matches[0];
+      const bdText = match
+        ? `${match.name || "-"} / ${match.bd_id || "-"} / ${match.contact_id || "-"}`
+        : result.message || "-";
+      return `
+        <div class="lookup-result-row">
+          <span>${escapeHtml(result.merchant_name)}</span>
+          <span>${escapeHtml(bdText)}</span>
+          <span class="chip ${escapeHtml(result.status)}">${escapeHtml(result.status)}</span>
+        </div>
+      `;
+    }).join("");
+    els.lookupResults.className = "lookup-results";
+    els.lookupResults.innerHTML = `<div class="muted">${escapeHtml(summary)}</div>${rows}`;
   }
 
   function taskStats(task) {
@@ -966,6 +1071,38 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
     }
   }
 
+  async function lookupMerchants() {
+    clearNotice();
+    try {
+      const data = await api("/api/merchant-bd/lookup", {
+        method: "POST",
+        body: JSON.stringify({ text: els.merchantNamesInput.value })
+      });
+      state.lookupRecipients = data.recipients || [];
+      els.useLookupBtn.disabled = state.lookupRecipients.length === 0;
+      renderLookupResults(data);
+      showNotice(`已查询 ${data.total} 个商家，生成 ${data.recipient_count} 个 BD 收件人`);
+    } catch (error) {
+      state.lookupRecipients = [];
+      els.useLookupBtn.disabled = true;
+      els.lookupResults.textContent = "查询失败";
+      showNotice(error.message, true);
+    }
+  }
+
+  function useLookupRecipients() {
+    if (!state.lookupRecipients.length) {
+      showNotice("没有可填入的 BD 名单", true);
+      return;
+    }
+    setMode("csv");
+    els.csvInput.value = lookupRecipientsToCsv(state.lookupRecipients);
+    if ([...els.messageType.options].some((option) => option.value === "merchant_follow_up")) {
+      els.messageType.value = "merchant_follow_up";
+    }
+    showNotice(`已填入 ${state.lookupRecipients.length} 个 BD，建议先预览再发送`);
+  }
+
   function setMode(mode) {
     state.mode = mode;
     els.csvModeBtn.classList.toggle("active", mode === "csv");
@@ -983,6 +1120,8 @@ bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
     });
     els.csvModeBtn.addEventListener("click", () => setMode("csv"));
     els.jsonModeBtn.addEventListener("click", () => setMode("json"));
+    els.lookupMerchantBtn.addEventListener("click", lookupMerchants);
+    els.useLookupBtn.addEventListener("click", useLookupRecipients);
     els.previewBtn.addEventListener("click", previewTask);
     els.createBtn.addEventListener("click", createTask);
     els.refreshBtn.addEventListener("click", loadTasks);

@@ -1,8 +1,10 @@
+import json
 import tempfile
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
-from urllib.request import urlopen
+from pathlib import Path
+from urllib.request import Request, urlopen
 
 from miukoo_bot.api import make_handler
 from miukoo_bot.config import Settings
@@ -58,6 +60,12 @@ def build_payload():
 class APITest(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.TemporaryDirectory()
+        self.mapping_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        self.mapping_path.write_text(
+            "merchant_name,bd_id,name,contact_id,group,city\n"
+            "上海悦来火锅,bd_001,张三,mock_user_001,华东一区,上海\n",
+            encoding="utf-8",
+        )
         self.settings = Settings(
             database_path="{}/test.sqlite3".format(self.tmpdir.name),
             host="127.0.0.1",
@@ -74,6 +82,11 @@ class APITest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=None,
             lark_receive_id_type="open_id",
+            merchant_bd_lookup_provider="csv",
+            merchant_bd_mapping_csv=str(self.mapping_path),
+            fengshen_merchant_bd_lookup_url=None,
+            fengshen_api_token=None,
+            fengshen_timeout_seconds=10,
         )
         store = SQLiteStore(self.settings.database_path)
         store.init_db()
@@ -125,6 +138,26 @@ class APITest(unittest.TestCase):
         self.assertIn("text/csv", response.headers["Content-Type"])
         self.assertIn("last_reply_content", body)
         self.assertIn("已确认，库存正常", body)
+
+    def test_merchant_bd_lookup_endpoint(self):
+        request = Request(
+            "{}/api/merchant-bd/lookup".format(self.base_url),
+            data=json.dumps(
+                {"merchant_names": ["上海悦来火锅", "未知商家"]},
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urlopen(request, timeout=5) as response:
+            body = json.loads(response.read().decode("utf-8"))
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(body["matched_count"], 1)
+        self.assertEqual(body["unmatched_count"], 1)
+        self.assertEqual(body["recipient_count"], 1)
+        self.assertEqual(body["recipients"][0]["contact_id"], "mock_user_001")
 
 
 if __name__ == "__main__":

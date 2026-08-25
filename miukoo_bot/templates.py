@@ -58,6 +58,18 @@ DEFAULT_TEMPLATES: Dict[str, Dict[str, str]] = {
             "请在 {deadline} 前同步当前状态。"
         ),
     },
+    "merchant_follow_up": {
+        "initial": (
+            "Hi {name}，请帮忙跟进以下 {merchant_count} 个商家：\n\n"
+            "{merchant_names}\n\n"
+            "处理后直接回复当前进展即可。"
+        ),
+        "follow_up": (
+            "Hi {name}，上面 {merchant_count} 个商家的跟进还没有收到回复：\n\n"
+            "{merchant_names}\n\n"
+            "有进展请直接回复。"
+        ),
+    },
 }
 
 

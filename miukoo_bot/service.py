@@ -13,6 +13,7 @@ from miukoo_bot.lark_events import (
     is_lark_url_verification,
     parse_lark_reply_event,
 )
+from miukoo_bot.merchant_lookup import MerchantBDLookup, MerchantLookupError
 from miukoo_bot.messaging import MessageAdapter
 from miukoo_bot.templates import TemplateStore
 from miukoo_bot.time_utils import is_quiet_time, next_allowed_time, to_iso, utc_now
@@ -44,6 +45,7 @@ class BotService:
         self.adapter = adapter
         self.settings = settings
         self.clock = clock
+        self.merchant_lookup = MerchantBDLookup(settings)
 
     def create_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         task_id = uuid.uuid4().hex
@@ -146,6 +148,18 @@ class BotService:
         if not self.store.cancel_task(task_id):
             raise NotFoundError("Task not found: {}".format(task_id))
         return self.get_task(task_id)
+
+    def lookup_merchant_bds(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        raw_names = (
+            payload.get("merchant_names")
+            or payload.get("merchantNames")
+            or payload.get("text")
+            or payload.get("query")
+        )
+        try:
+            return self.merchant_lookup.lookup(raw_names)
+        except MerchantLookupError as exc:
+            raise ValidationError(str(exc)) from exc
 
     def export_task_replies_csv(self, task_id: str) -> Dict[str, str]:
         task = self.get_task(task_id)

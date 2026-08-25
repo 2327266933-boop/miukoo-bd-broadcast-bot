@@ -70,6 +70,11 @@ def make_handler(service: BotService):
                     self._send_json(200, service.preview_task(payload))
                     return
 
+                if path == "/api/merchant-bd/lookup":
+                    payload = self._read_json()
+                    self._send_json(200, service.lookup_merchant_bds(payload))
+                    return
+
                 if path == "/api/tasks":
                     payload = self._read_json()
                     self._send_json(201, service.create_task(payload))

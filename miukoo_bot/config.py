@@ -20,6 +20,11 @@ class Settings:
     lark_app_secret: Optional[str]
     lark_verification_token: Optional[str]
     lark_receive_id_type: str
+    merchant_bd_lookup_provider: str
+    merchant_bd_mapping_csv: Optional[str]
+    fengshen_merchant_bd_lookup_url: Optional[str]
+    fengshen_api_token: Optional[str]
+    fengshen_timeout_seconds: int
 
 
 def load_settings() -> Settings:
@@ -45,4 +50,17 @@ def load_settings() -> Settings:
         lark_app_secret=os.environ.get("LARK_APP_SECRET"),
         lark_verification_token=os.environ.get("LARK_VERIFICATION_TOKEN"),
         lark_receive_id_type=os.environ.get("LARK_RECEIVE_ID_TYPE", "open_id"),
+        merchant_bd_lookup_provider=os.environ.get(
+            "MERCHANT_BD_LOOKUP_PROVIDER",
+            "csv",
+        ),
+        merchant_bd_mapping_csv=os.environ.get(
+            "MERCHANT_BD_MAPPING_CSV",
+            "examples/merchant_bd_mapping.csv",
+        ),
+        fengshen_merchant_bd_lookup_url=os.environ.get(
+            "FENGSHEN_MERCHANT_BD_LOOKUP_URL"
+        ),
+        fengshen_api_token=os.environ.get("FENGSHEN_API_TOKEN"),
+        fengshen_timeout_seconds=int(os.environ.get("FENGSHEN_TIMEOUT_SECONDS", "10")),
     )

@@ -1,0 +1,4 @@
+merchant_name,bd_id,name,contact_id,group,city
+上海悦来火锅,bd_001,张三,mock_user_001,华东一区,上海
+上海云亭烤肉,bd_001,张三,mock_user_001,华东一区,上海
+广州花城茶餐厅,bd_002,李四,mock_user_002,华南二区,广州
