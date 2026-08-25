@@ -1,0 +1,10 @@
+[project]
+name = "miukoo-bd-bot"
+version = "0.1.0"
+description = "BD group broadcast and follow-up bot MVP"
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

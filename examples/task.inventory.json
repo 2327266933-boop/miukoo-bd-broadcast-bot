@@ -1,0 +1,41 @@
+{
+  "task_name": "8月门店库存确认",
+  "channel": "mock",
+  "message_type": "inventory_check",
+  "created_by": "operator_001",
+  "recipients": [
+    {
+      "bd_id": "bd_001",
+      "name": "张三",
+      "contact_id": "mock_user_001",
+      "group": "华东一区",
+      "variables": {
+        "city": "上海",
+        "shop_count": 12,
+        "deadline": "今天 18:00"
+      }
+    },
+    {
+      "bd_id": "bd_002",
+      "name": "李四",
+      "contact_id": "mock_user_002",
+      "group": "华南二区",
+      "variables": {
+        "city": "广州",
+        "shop_count": 8,
+        "deadline": "今天 18:00"
+      }
+    }
+  ],
+  "follow_up": {
+    "enabled": true,
+    "first_remind_after_minutes": 1,
+    "remind_interval_minutes": 2,
+    "max_remind_times": 2,
+    "stop_when_replied": true,
+    "quiet_hours": {
+      "start": "00:00",
+      "end": "00:00"
+    }
+  }
+}
