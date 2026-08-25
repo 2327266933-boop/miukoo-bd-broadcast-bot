@@ -86,6 +86,10 @@ class APITest(unittest.TestCase):
             merchant_bd_mapping_csv=str(self.mapping_path),
             fengshen_merchant_bd_lookup_url=None,
             fengshen_api_token=None,
+            fengshen_token_url=None,
+            fengshen_client_id=None,
+            fengshen_client_secret=None,
+            fengshen_scope=None,
             fengshen_timeout_seconds=10,
         )
         store = SQLiteStore(self.settings.database_path)

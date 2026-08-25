@@ -1,8 +1,12 @@
+import json
 import tempfile
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
+from urllib.parse import parse_qs
 
 from miukoo_bot.config import Settings
 from miukoo_bot.db import SQLiteStore
@@ -91,6 +95,10 @@ class BotServiceTest(unittest.TestCase):
             merchant_bd_mapping_csv=None,
             fengshen_merchant_bd_lookup_url=None,
             fengshen_api_token=None,
+            fengshen_token_url=None,
+            fengshen_client_id=None,
+            fengshen_client_secret=None,
+            fengshen_scope=None,
             fengshen_timeout_seconds=10,
         )
         self.store = SQLiteStore(self.settings.database_path)
@@ -215,6 +223,10 @@ class BotServiceTest(unittest.TestCase):
             merchant_bd_mapping_csv=self.settings.merchant_bd_mapping_csv,
             fengshen_merchant_bd_lookup_url=self.settings.fengshen_merchant_bd_lookup_url,
             fengshen_api_token=self.settings.fengshen_api_token,
+            fengshen_token_url=self.settings.fengshen_token_url,
+            fengshen_client_id=self.settings.fengshen_client_id,
+            fengshen_client_secret=self.settings.fengshen_client_secret,
+            fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
         )
         self.service = BotService(
@@ -293,6 +305,101 @@ class BotServiceTest(unittest.TestCase):
 
         self.assertIn("上海悦来火锅", preview["recipients"][0]["messages"]["initial"])
         self.assertIn("1 个商家", preview["recipients"][0]["messages"]["initial"])
+
+    def test_fengshen_lookup_can_use_client_credentials_token(self):
+        captured = {
+            "token_body": "",
+            "lookup_authorization": "",
+        }
+
+        class FengshenHandler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                return
+
+            def do_POST(handler_self):
+                length = int(handler_self.headers.get("Content-Length", "0"))
+                body = handler_self.rfile.read(length).decode("utf-8")
+                if handler_self.path == "/token":
+                    captured["token_body"] = body
+                    handler_self._send_json(
+                        {
+                            "access_token": "fengshen_test_token",
+                            "expires_in": 3600,
+                        }
+                    )
+                    return
+                if handler_self.path == "/lookup":
+                    captured["lookup_authorization"] = handler_self.headers.get(
+                        "Authorization",
+                        "",
+                    )
+                    handler_self._send_json(
+                        {
+                            "results": [
+                                {
+                                    "merchant_name": "上海悦来火锅",
+                                    "matches": [
+                                        {
+                                            "merchant_name": "上海悦来火锅",
+                                            "bd_id": "bd_001",
+                                            "name": "张三",
+                                            "contact_id": "mock_user_001",
+                                            "group": "华东一区",
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    )
+                    return
+                handler_self.send_response(404)
+                handler_self.end_headers()
+
+            def _send_json(handler_self, payload):
+                body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                handler_self.send_response(200)
+                handler_self.send_header("Content-Type", "application/json")
+                handler_self.send_header("Content-Length", str(len(body)))
+                handler_self.end_headers()
+                handler_self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FengshenHandler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base_url = "http://127.0.0.1:{}".format(server.server_port)
+            self.settings = replace(
+                self.settings,
+                merchant_bd_lookup_provider="fengshen",
+                fengshen_merchant_bd_lookup_url="{}/lookup".format(base_url),
+                fengshen_token_url="{}/token".format(base_url),
+                fengshen_client_id="client-id",
+                fengshen_client_secret="client-secret",
+            )
+            self.service = BotService(
+                store=self.store,
+                templates=TemplateStore(),
+                adapter=self.adapter,
+                settings=self.settings,
+                clock=self.clock,
+            )
+
+            result = self.service.lookup_merchant_bds({"text": "上海悦来火锅"})
+
+            token_body = parse_qs(captured["token_body"])
+            self.assertEqual(token_body["grant_type"], ["client_credentials"])
+            self.assertEqual(token_body["client_id"], ["client-id"])
+            self.assertEqual(token_body["client_secret"], ["client-secret"])
+            self.assertEqual(
+                captured["lookup_authorization"],
+                "Bearer fengshen_test_token",
+            )
+            self.assertEqual(result["source"], "fengshen")
+            self.assertEqual(result["recipient_count"], 1)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_lark_url_verification_returns_challenge(self):
         self._set_lark_token("verify-token")
@@ -415,6 +522,10 @@ class BotServiceTest(unittest.TestCase):
             merchant_bd_mapping_csv=self.settings.merchant_bd_mapping_csv,
             fengshen_merchant_bd_lookup_url=self.settings.fengshen_merchant_bd_lookup_url,
             fengshen_api_token=self.settings.fengshen_api_token,
+            fengshen_token_url=self.settings.fengshen_token_url,
+            fengshen_client_id=self.settings.fengshen_client_id,
+            fengshen_client_secret=self.settings.fengshen_client_secret,
+            fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
         )
         self.service = BotService(

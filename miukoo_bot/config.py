@@ -24,6 +24,10 @@ class Settings:
     merchant_bd_mapping_csv: Optional[str]
     fengshen_merchant_bd_lookup_url: Optional[str]
     fengshen_api_token: Optional[str]
+    fengshen_token_url: Optional[str]
+    fengshen_client_id: Optional[str]
+    fengshen_client_secret: Optional[str]
+    fengshen_scope: Optional[str]
     fengshen_timeout_seconds: int
 
 
@@ -62,5 +66,12 @@ def load_settings() -> Settings:
             "FENGSHEN_MERCHANT_BD_LOOKUP_URL"
         ),
         fengshen_api_token=os.environ.get("FENGSHEN_API_TOKEN"),
+        fengshen_token_url=os.environ.get("FENGSHEN_TOKEN_URL"),
+        fengshen_client_id=os.environ.get("FENGSHEN_CLIENT_ID"),
+        fengshen_client_secret=(
+            os.environ.get("FENGSHEN_CLIENT_SECRET")
+            or os.environ.get("FENGSHEN_CLIENT_PASSWORD")
+        ),
+        fengshen_scope=os.environ.get("FENGSHEN_SCOPE"),
         fengshen_timeout_seconds=int(os.environ.get("FENGSHEN_TIMEOUT_SECONDS", "10")),
     )

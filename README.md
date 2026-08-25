@@ -275,9 +275,25 @@ merchant_name,bd_id,name,contact_id,group,city
 ```bash
 MERCHANT_BD_LOOKUP_PROVIDER=fengshen
 FENGSHEN_MERCHANT_BD_LOOKUP_URL=https://your-fengshen-endpoint
-FENGSHEN_API_TOKEN=your-token
 FENGSHEN_TIMEOUT_SECONDS=10
 ```
+
+如果风神直接给长期访问 token，配置：
+
+```bash
+FENGSHEN_API_TOKEN=your-token
+```
+
+如果风神给的是 client ID 和 client secret/password，配置：
+
+```bash
+FENGSHEN_TOKEN_URL=https://your-fengshen-token-endpoint
+FENGSHEN_CLIENT_ID=your-client-id
+FENGSHEN_CLIENT_SECRET=your-client-secret
+FENGSHEN_SCOPE=
+```
+
+不要把真实 client ID、secret、password 写进代码、README、CSV 或 GitHub 仓库。部署时放到服务器环境变量或 GitHub/云平台 Secrets。
 
 当前服务会向风神地址发送：
 
@@ -605,6 +621,10 @@ MERCHANT_BD_LOOKUP_PROVIDER=csv
 MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
 FENGSHEN_MERCHANT_BD_LOOKUP_URL=
 FENGSHEN_API_TOKEN=
+FENGSHEN_TOKEN_URL=
+FENGSHEN_CLIENT_ID=
+FENGSHEN_CLIENT_SECRET=
+FENGSHEN_SCOPE=
 FENGSHEN_TIMEOUT_SECONDS=10
 
 DEFAULT_FIRST_REMIND_AFTER_MINUTES=120

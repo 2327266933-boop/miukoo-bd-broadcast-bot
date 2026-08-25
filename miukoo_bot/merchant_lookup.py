@@ -1,6 +1,8 @@
 import csv
 import json
+import time
 from typing import Any, Dict, Iterable, List, Tuple
+from urllib.parse import urlencode
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -29,6 +31,8 @@ GROUP_FIELDS = ("group", "region", "city_group", "区域", "分组", "城市")
 class MerchantBDLookup:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._cached_access_token = ""
+        self._cached_access_token_expires_at = 0.0
 
     def lookup(self, raw_merchant_names: Any) -> Dict[str, Any]:
         merchant_names = split_merchant_names(raw_merchant_names)
@@ -64,8 +68,9 @@ class MerchantBDLookup:
     def _lookup_from_fengshen(self, merchant_names: List[str]) -> Dict[str, Any]:
         payload = json.dumps({"merchant_names": merchant_names}, ensure_ascii=False)
         headers = {"Content-Type": "application/json"}
-        if self.settings.fengshen_api_token:
-            headers["Authorization"] = "Bearer {}".format(self.settings.fengshen_api_token)
+        access_token = self._resolve_fengshen_access_token()
+        if access_token:
+            headers["Authorization"] = "Bearer {}".format(access_token)
 
         request = Request(
             self.settings.fengshen_merchant_bd_lookup_url,
@@ -112,6 +117,78 @@ class MerchantBDLookup:
                 "Fengshen lookup response must include results or data list"
             )
         return build_lookup_response("fengshen", merchant_names, raw_results)
+
+    def _resolve_fengshen_access_token(self) -> str:
+        if self.settings.fengshen_api_token:
+            return self.settings.fengshen_api_token
+
+        has_client_credentials = (
+            self.settings.fengshen_token_url
+            and self.settings.fengshen_client_id
+            and self.settings.fengshen_client_secret
+        )
+        if not has_client_credentials:
+            partially_configured = any(
+                (
+                    self.settings.fengshen_token_url,
+                    self.settings.fengshen_client_id,
+                    self.settings.fengshen_client_secret,
+                )
+            )
+            if partially_configured:
+                raise MerchantLookupError(
+                    "FENGSHEN_TOKEN_URL, FENGSHEN_CLIENT_ID and "
+                    "FENGSHEN_CLIENT_SECRET are required together"
+                )
+            return ""
+
+        now = time.time()
+        if (
+            self._cached_access_token
+            and self._cached_access_token_expires_at
+            and now < self._cached_access_token_expires_at - 60
+        ):
+            return self._cached_access_token
+
+        form = {
+            "grant_type": "client_credentials",
+            "client_id": self.settings.fengshen_client_id,
+            "client_secret": self.settings.fengshen_client_secret,
+        }
+        if self.settings.fengshen_scope:
+            form["scope"] = self.settings.fengshen_scope
+
+        request = Request(
+            self.settings.fengshen_token_url,
+            data=urlencode(form).encode("utf-8"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.settings.fengshen_timeout_seconds) as response:
+                decoded = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise MerchantLookupError(
+                "Fengshen token request failed: HTTP {}".format(exc.code)
+            ) from exc
+        except URLError as exc:
+            raise MerchantLookupError(
+                "Fengshen token request failed: {}".format(exc)
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise MerchantLookupError(
+                "Fengshen token response returned invalid JSON"
+            ) from exc
+
+        token, expires_in = extract_access_token(decoded)
+        if not token:
+            raise MerchantLookupError(
+                "Fengshen token response must include access_token or token"
+            )
+
+        self._cached_access_token = token
+        self._cached_access_token_expires_at = now + expires_in
+        return token
 
 
 def split_merchant_names(value: Any) -> List[str]:
@@ -266,6 +343,30 @@ def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Di
         "group": group,
         "variables": variables,
     }
+
+
+def extract_access_token(payload: Dict[str, Any]) -> Tuple[str, int]:
+    candidates = [payload]
+    if isinstance(payload.get("data"), dict):
+        candidates.append(payload["data"])
+    if isinstance(payload.get("result"), dict):
+        candidates.append(payload["result"])
+
+    for item in candidates:
+        token = clean(
+            item.get("access_token")
+            or item.get("token")
+            or item.get("accessToken")
+        )
+        if token:
+            expires_in = item.get("expires_in") or item.get("expiresIn") or 3600
+            try:
+                parsed_expires_in = int(expires_in)
+            except (TypeError, ValueError):
+                parsed_expires_in = 3600
+            return token, max(parsed_expires_in, 120)
+
+    return "", 0
 
 
 def build_recipients_from_lookup_results(
