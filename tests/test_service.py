@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
+import miukoo_bot.merchant_lookup as merchant_lookup_module
 from miukoo_bot.config import Settings
 from miukoo_bot.db import SQLiteStore
 from miukoo_bot.messaging import MessageAdapter, SendResult
@@ -90,6 +91,8 @@ class BotServiceTest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=None,
             lark_receive_id_type="open_id",
+            lark_department_id_type="open_department_id",
+            lark_timeout_seconds=10,
             merchant_bd_lookup_provider="csv",
             merchant_bd_mapping_csv=None,
             fengshen_merchant_bd_lookup_url=None,
@@ -101,6 +104,7 @@ class BotServiceTest(unittest.TestCase):
             fengshen_client_secret_field="clientSecret",
             fengshen_scope=None,
             fengshen_timeout_seconds=10,
+            sales_contact_lookup_provider="csv",
             sales_contact_directory_csv=None,
             sales_target_department="服务零售KA——丽人",
         )
@@ -222,6 +226,8 @@ class BotServiceTest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=None,
             lark_receive_id_type="open_id",
+            lark_department_id_type=self.settings.lark_department_id_type,
+            lark_timeout_seconds=self.settings.lark_timeout_seconds,
             merchant_bd_lookup_provider=self.settings.merchant_bd_lookup_provider,
             merchant_bd_mapping_csv=self.settings.merchant_bd_mapping_csv,
             fengshen_merchant_bd_lookup_url=self.settings.fengshen_merchant_bd_lookup_url,
@@ -233,6 +239,7 @@ class BotServiceTest(unittest.TestCase):
             fengshen_client_secret_field=self.settings.fengshen_client_secret_field,
             fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
+            sales_contact_lookup_provider=self.settings.sales_contact_lookup_provider,
             sales_contact_directory_csv=self.settings.sales_contact_directory_csv,
             sales_target_department=self.settings.sales_target_department,
         )
@@ -393,6 +400,151 @@ class BotServiceTest(unittest.TestCase):
         self.assertTrue(match["sales_resolution"]["duplicate_name"])
         self.assertEqual(len(match["sales_resolution"]["candidates"]), 2)
         self.assertEqual(result["recipient_count"], 0)
+
+    def test_lookup_searches_feishu_users_and_selects_target_department(self):
+        merchant_csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        merchant_csv_path.write_text(
+            "总户商家名称,销售名称_最新,group\n"
+            "杭州沐暮子科技有限公司,高流,华东一区\n",
+            encoding="utf-8",
+        )
+        captured = {
+            "token_body": {},
+            "search_body": {},
+        }
+
+        class LarkContactHandler(BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                _ = _args
+                return
+
+            def do_POST(handler_self):
+                length = int(handler_self.headers.get("Content-Length", "0"))
+                body = handler_self.rfile.read(length).decode("utf-8")
+                if handler_self.path == "/token":
+                    captured["token_body"] = json.loads(body)
+                    handler_self._send_json(
+                        {
+                            "code": 0,
+                            "tenant_access_token": "tenant-token",
+                            "expire": 7200,
+                        }
+                    )
+                    return
+                if handler_self.path.startswith("/contact/v3/users/search"):
+                    captured["search_body"] = json.loads(body)
+                    handler_self._send_json(
+                        {
+                            "code": 0,
+                            "data": {
+                                "items": [
+                                    {
+                                        "name": "高流",
+                                        "open_id": "ou_liren",
+                                        "user_id": "user_liren",
+                                        "department_ids": ["dep_liren"],
+                                    },
+                                    {
+                                        "name": "高流",
+                                        "open_id": "ou_other",
+                                        "user_id": "user_other",
+                                        "department_ids": ["dep_other"],
+                                    },
+                                ]
+                            },
+                        }
+                    )
+                    return
+                handler_self.send_response(404)
+                handler_self.end_headers()
+
+            def do_GET(handler_self):
+                if handler_self.path.startswith("/contact/v3/departments/dep_liren"):
+                    handler_self._send_json(
+                        {
+                            "code": 0,
+                            "data": {
+                                "department": {
+                                    "name": "服务零售KA——丽人",
+                                }
+                            },
+                        }
+                    )
+                    return
+                if handler_self.path.startswith("/contact/v3/departments/dep_other"):
+                    handler_self._send_json(
+                        {
+                            "code": 0,
+                            "data": {
+                                "department": {
+                                    "name": "服务零售KA——到综",
+                                }
+                            },
+                        }
+                    )
+                    return
+                handler_self.send_response(404)
+                handler_self.end_headers()
+
+            def _send_json(handler_self, payload):
+                body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                handler_self.send_response(200)
+                handler_self.send_header("Content-Type", "application/json")
+                handler_self.send_header("Content-Length", str(len(body)))
+                handler_self.end_headers()
+                handler_self.wfile.write(body)
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), LarkContactHandler)
+        thread = Thread(target=server.serve_forever, daemon=True)
+        original_token_url = merchant_lookup_module.LARK_TENANT_TOKEN_URL
+        original_search_url = merchant_lookup_module.LARK_USER_SEARCH_URL
+        original_department_url = merchant_lookup_module.LARK_DEPARTMENT_URL
+        thread.start()
+        try:
+            base_url = "http://127.0.0.1:{}".format(server.server_port)
+            merchant_lookup_module.LARK_TENANT_TOKEN_URL = "{}/token".format(base_url)
+            merchant_lookup_module.LARK_USER_SEARCH_URL = (
+                "{}/contact/v3/users/search".format(base_url)
+            )
+            merchant_lookup_module.LARK_DEPARTMENT_URL = (
+                "{}/contact/v3/departments/{{}}".format(base_url)
+            )
+            self.settings = replace(
+                self.settings,
+                merchant_bd_mapping_csv=str(merchant_csv_path),
+                lark_app_id="app-id",
+                lark_app_secret="app-secret",
+                sales_contact_lookup_provider="lark",
+                sales_target_department="服务零售KA——丽人",
+            )
+            self.service = BotService(
+                store=self.store,
+                templates=TemplateStore(),
+                adapter=self.adapter,
+                settings=self.settings,
+                clock=self.clock,
+            )
+
+            result = self.service.lookup_merchant_bds({"text": "沐暮子"})
+            match = result["results"][0]["matches"][0]
+
+            self.assertEqual(captured["token_body"]["app_id"], "app-id")
+            self.assertEqual(captured["search_body"]["query"], "高流")
+            self.assertEqual(result["results"][0]["status"], "matched")
+            self.assertEqual(match["contact_id"], "ou_liren")
+            self.assertEqual(match["department"], "服务零售KA——丽人")
+            self.assertEqual(
+                match["sales_resolution"]["status"],
+                "resolved_by_department",
+            )
+            self.assertEqual(result["recipients"][0]["contact_id"], "ou_liren")
+        finally:
+            merchant_lookup_module.LARK_TENANT_TOKEN_URL = original_token_url
+            merchant_lookup_module.LARK_USER_SEARCH_URL = original_search_url
+            merchant_lookup_module.LARK_DEPARTMENT_URL = original_department_url
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_lookup_recipients_can_render_merchant_follow_up_template(self):
         csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
@@ -641,6 +793,8 @@ class BotServiceTest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=token,
             lark_receive_id_type="open_id",
+            lark_department_id_type=self.settings.lark_department_id_type,
+            lark_timeout_seconds=self.settings.lark_timeout_seconds,
             merchant_bd_lookup_provider=self.settings.merchant_bd_lookup_provider,
             merchant_bd_mapping_csv=self.settings.merchant_bd_mapping_csv,
             fengshen_merchant_bd_lookup_url=self.settings.fengshen_merchant_bd_lookup_url,
@@ -652,6 +806,7 @@ class BotServiceTest(unittest.TestCase):
             fengshen_client_secret_field=self.settings.fengshen_client_secret_field,
             fengshen_scope=self.settings.fengshen_scope,
             fengshen_timeout_seconds=self.settings.fengshen_timeout_seconds,
+            sales_contact_lookup_provider=self.settings.sales_contact_lookup_provider,
             sales_contact_directory_csv=self.settings.sales_contact_directory_csv,
             sales_target_department=self.settings.sales_target_department,
         )

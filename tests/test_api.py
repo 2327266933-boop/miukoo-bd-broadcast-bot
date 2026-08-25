@@ -82,6 +82,8 @@ class APITest(unittest.TestCase):
             lark_app_secret=None,
             lark_verification_token=None,
             lark_receive_id_type="open_id",
+            lark_department_id_type="open_department_id",
+            lark_timeout_seconds=10,
             merchant_bd_lookup_provider="csv",
             merchant_bd_mapping_csv=str(self.mapping_path),
             fengshen_merchant_bd_lookup_url=None,
@@ -93,6 +95,7 @@ class APITest(unittest.TestCase):
             fengshen_client_secret_field="clientSecret",
             fengshen_scope=None,
             fengshen_timeout_seconds=10,
+            sales_contact_lookup_provider="csv",
             sales_contact_directory_csv=None,
             sales_target_department="服务零售KA——丽人",
         )

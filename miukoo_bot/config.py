@@ -23,6 +23,8 @@ class Settings:
     lark_app_secret: Optional[str]
     lark_verification_token: Optional[str]
     lark_receive_id_type: str
+    lark_department_id_type: str
+    lark_timeout_seconds: int
     merchant_bd_lookup_provider: str
     merchant_bd_mapping_csv: Optional[str]
     fengshen_merchant_bd_lookup_url: Optional[str]
@@ -34,6 +36,7 @@ class Settings:
     fengshen_client_secret_field: str
     fengshen_scope: Optional[str]
     fengshen_timeout_seconds: int
+    sales_contact_lookup_provider: str
     sales_contact_directory_csv: Optional[str]
     sales_target_department: Optional[str]
 
@@ -61,6 +64,11 @@ def load_settings() -> Settings:
         lark_app_secret=os.environ.get("LARK_APP_SECRET"),
         lark_verification_token=os.environ.get("LARK_VERIFICATION_TOKEN"),
         lark_receive_id_type=os.environ.get("LARK_RECEIVE_ID_TYPE", "open_id"),
+        lark_department_id_type=os.environ.get(
+            "LARK_DEPARTMENT_ID_TYPE",
+            "open_department_id",
+        ),
+        lark_timeout_seconds=int(os.environ.get("LARK_TIMEOUT_SECONDS", "10")),
         merchant_bd_lookup_provider=os.environ.get(
             "MERCHANT_BD_LOOKUP_PROVIDER",
             "csv",
@@ -89,6 +97,10 @@ def load_settings() -> Settings:
         ),
         fengshen_scope=os.environ.get("FENGSHEN_SCOPE"),
         fengshen_timeout_seconds=int(os.environ.get("FENGSHEN_TIMEOUT_SECONDS", "10")),
+        sales_contact_lookup_provider=os.environ.get(
+            "SALES_CONTACT_LOOKUP_PROVIDER",
+            "auto",
+        ),
         sales_contact_directory_csv=os.environ.get(
             "SALES_CONTACT_DIRECTORY_CSV",
             "examples/sales_contact_directory.csv",

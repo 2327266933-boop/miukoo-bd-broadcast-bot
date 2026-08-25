@@ -2,6 +2,7 @@ import csv
 import json
 import time
 from typing import Any, Dict, Iterable, List, Tuple
+from urllib import parse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -11,6 +12,12 @@ from miukoo_bot.config import Settings
 class MerchantLookupError(ValueError):
     pass
 
+
+LARK_TENANT_TOKEN_URL = (
+    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
+)
+LARK_USER_SEARCH_URL = "https://open.feishu.cn/open-apis/contact/v3/users/search"
+LARK_DEPARTMENT_URL = "https://open.feishu.cn/open-apis/contact/v3/departments/{}"
 
 MERCHANT_NAME_FIELDS = (
     "merchant_name",
@@ -82,6 +89,10 @@ class MerchantBDLookup:
         self.settings = settings
         self._cached_access_token = ""
         self._cached_access_token_expires_at = 0.0
+        self._cached_lark_access_token = ""
+        self._cached_lark_access_token_expires_at = 0.0
+        self._cached_sales_contact_directory: List[Dict[str, Any]] = []
+        self._cached_lark_department_names: Dict[str, str] = {}
 
     def lookup(self, raw_merchant_names: Any) -> Dict[str, Any]:
         merchant_names = split_merchant_names(raw_merchant_names)
@@ -242,10 +253,7 @@ class MerchantBDLookup:
         return token
 
     def _resolve_sales_contacts(self, response: Dict[str, Any]) -> None:
-        directory = self._load_sales_contact_directory()
-        if not directory:
-            return
-
+        resolved_by_name: Dict[str, List[Dict[str, Any]]] = {}
         for result in response["results"]:
             if not result.get("matches"):
                 continue
@@ -255,9 +263,13 @@ class MerchantBDLookup:
                 sales_name = match.get("sales_name") or match.get("name")
                 if not sales_name:
                     continue
+                if sales_name not in resolved_by_name:
+                    resolved_by_name[sales_name] = self._lookup_sales_contacts(
+                        sales_name
+                    )
                 resolution = resolve_sales_contact(
                     sales_name,
-                    directory,
+                    resolved_by_name[sales_name],
                     self.settings.sales_target_department,
                 )
                 match["sales_resolution"] = resolution
@@ -272,15 +284,218 @@ class MerchantBDLookup:
                     result["status"] = "ambiguous"
                     result["message"] = resolution["message"]
 
+    def _lookup_sales_contacts(self, sales_name: str) -> List[Dict[str, Any]]:
+        provider = (self.settings.sales_contact_lookup_provider or "auto").lower()
+        if provider not in ("auto", "csv", "lark", "feishu"):
+            raise MerchantLookupError(
+                "Unsupported sales contact lookup provider: {}".format(provider)
+            )
+
+        has_lark_credentials = bool(
+            self.settings.lark_app_id and self.settings.lark_app_secret
+        )
+        if provider in ("lark", "feishu") or (
+            provider == "auto" and has_lark_credentials
+        ):
+            return self._lookup_sales_contacts_from_lark(sales_name)
+        return [
+            item
+            for item in self._load_sales_contact_directory()
+            if normalize_name(item.get("name")) == normalize_name(sales_name)
+        ]
+
     def _load_sales_contact_directory(self) -> List[Dict[str, Any]]:
+        if self._cached_sales_contact_directory:
+            return self._cached_sales_contact_directory
+
         path = self.settings.sales_contact_directory_csv
         if not path:
             return []
         try:
             with open(path, newline="", encoding="utf-8-sig") as csv_file:
-                return [normalize_sales_contact(row) for row in csv.DictReader(csv_file)]
+                self._cached_sales_contact_directory = [
+                    normalize_sales_contact(row) for row in csv.DictReader(csv_file)
+                ]
+                return self._cached_sales_contact_directory
         except FileNotFoundError:
             return []
+
+    def _lookup_sales_contacts_from_lark(self, sales_name: str) -> List[Dict[str, Any]]:
+        token = self._resolve_lark_access_token()
+        query = parse.urlencode(
+            {
+                "user_id_type": self.settings.lark_receive_id_type,
+                "department_id_type": self.settings.lark_department_id_type,
+            }
+        )
+        decoded = self._lark_post_json(
+            "{}?{}".format(LARK_USER_SEARCH_URL, query),
+            {"query": sales_name, "page_size": 20},
+            token,
+        )
+        items = extract_lark_user_items(decoded)
+        contacts = [
+            normalize_lark_user_contact(item, self.settings.lark_receive_id_type)
+            for item in items
+            if item
+        ]
+        self._hydrate_lark_department_names(contacts, token)
+        return [
+            contact
+            for contact in contacts
+            if normalize_name(contact.get("name")) == normalize_name(sales_name)
+        ]
+
+    def _resolve_lark_access_token(self) -> str:
+        if not self.settings.lark_app_id or not self.settings.lark_app_secret:
+            raise MerchantLookupError(
+                "LARK_APP_ID and LARK_APP_SECRET are required for Feishu user lookup"
+            )
+
+        now = time.time()
+        if (
+            self._cached_lark_access_token
+            and self._cached_lark_access_token_expires_at
+            and now < self._cached_lark_access_token_expires_at - 60
+        ):
+            return self._cached_lark_access_token
+
+        request = Request(
+            LARK_TENANT_TOKEN_URL,
+            data=json.dumps(
+                {
+                    "app_id": self.settings.lark_app_id,
+                    "app_secret": self.settings.lark_app_secret,
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.settings.lark_timeout_seconds) as response:
+                decoded = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise MerchantLookupError(
+                "Feishu token request failed: HTTP {}".format(exc.code)
+            ) from exc
+        except URLError as exc:
+            raise MerchantLookupError(
+                "Feishu token request failed: {}".format(exc)
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise MerchantLookupError(
+                "Feishu token response returned invalid JSON"
+            ) from exc
+
+        code = decoded.get("code")
+        if code not in (0, None):
+            raise MerchantLookupError(
+                "Feishu token request failed: {}".format(
+                    decoded.get("msg") or decoded
+                )
+            )
+
+        token = clean(decoded.get("tenant_access_token"))
+        if not token:
+            raise MerchantLookupError("Feishu token response missing tenant_access_token")
+
+        expires_in = decoded.get("expire") or decoded.get("expires_in") or 7200
+        try:
+            parsed_expires_in = int(expires_in)
+        except (TypeError, ValueError):
+            parsed_expires_in = 7200
+        self._cached_lark_access_token = token
+        self._cached_lark_access_token_expires_at = now + parsed_expires_in
+        return token
+
+    def _lark_post_json(
+        self,
+        url: str,
+        payload: Dict[str, Any],
+        token: str,
+    ) -> Dict[str, Any]:
+        request = Request(
+            url,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": "Bearer {}".format(token),
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            method="POST",
+        )
+        return self._send_lark_request(request)
+
+    def _lark_get_json(self, url: str, token: str) -> Dict[str, Any]:
+        request = Request(
+            url,
+            headers={
+                "Authorization": "Bearer {}".format(token),
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            method="GET",
+        )
+        return self._send_lark_request(request)
+
+    def _send_lark_request(self, request: Request) -> Dict[str, Any]:
+        try:
+            with urlopen(request, timeout=self.settings.lark_timeout_seconds) as response:
+                decoded = json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            raise MerchantLookupError(
+                "Feishu contact lookup failed: HTTP {}".format(exc.code)
+            ) from exc
+        except URLError as exc:
+            raise MerchantLookupError(
+                "Feishu contact lookup failed: {}".format(exc)
+            ) from exc
+        except json.JSONDecodeError as exc:
+            raise MerchantLookupError(
+                "Feishu contact lookup returned invalid JSON"
+            ) from exc
+
+        code = decoded.get("code")
+        if code not in (0, None):
+            raise MerchantLookupError(
+                "Feishu contact lookup failed: {}".format(
+                    decoded.get("msg") or decoded
+                )
+            )
+        return decoded
+
+    def _hydrate_lark_department_names(
+        self,
+        contacts: List[Dict[str, Any]],
+        token: str,
+    ) -> None:
+        for contact in contacts:
+            if contact.get("department"):
+                continue
+            department_ids = contact.get("_department_ids") or []
+            names = []
+            for department_id in department_ids:
+                department_id = clean(department_id)
+                if not department_id:
+                    continue
+                if department_id not in self._cached_lark_department_names:
+                    url = "{}?{}".format(
+                        LARK_DEPARTMENT_URL.format(parse.quote(department_id, safe="")),
+                        parse.urlencode(
+                            {
+                                "department_id_type": (
+                                    self.settings.lark_department_id_type
+                                )
+                            }
+                        ),
+                    )
+                    decoded = self._lark_get_json(url, token)
+                    self._cached_lark_department_names[department_id] = (
+                        extract_lark_department_name(decoded)
+                    )
+                name = self._cached_lark_department_names.get(department_id)
+                if name:
+                    names.append(name)
+            contact["department"] = " / ".join(names)
 
 
 def split_merchant_names(value: Any) -> List[str]:
@@ -444,7 +659,7 @@ def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Di
     }
 
 
-def normalize_sales_contact(row: Dict[str, Any]) -> Dict[str, str]:
+def normalize_sales_contact(row: Dict[str, Any]) -> Dict[str, Any]:
     cleaned = {str(key).strip(): clean(value) for key, value in row.items()}
     name = first_value(cleaned, BD_NAME_FIELDS)
     contact_id = first_value(cleaned, CONTACT_ID_FIELDS)
@@ -458,9 +673,132 @@ def normalize_sales_contact(row: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
+def normalize_lark_user_contact(
+    item: Dict[str, Any],
+    receive_id_type: str,
+) -> Dict[str, Any]:
+    name = clean(
+        item.get("name")
+        or item.get("cn_name")
+        or item.get("nickname")
+        or item.get("en_name")
+    )
+    open_id = clean(item.get("open_id") or item.get("openId"))
+    user_id = clean(item.get("user_id") or item.get("userId"))
+    if receive_id_type == "open_id":
+        contact_id = open_id or user_id
+    elif receive_id_type == "user_id":
+        contact_id = user_id or open_id
+    else:
+        contact_id = user_id or open_id
+
+    department_text, department_ids = extract_lark_department_data(item)
+    return {
+        "name": name,
+        "bd_id": user_id or open_id or name,
+        "contact_id": contact_id,
+        "department": department_text,
+        "_department_ids": department_ids,
+    }
+
+
+def extract_lark_user_items(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    candidates = (
+        data.get("items")
+        or data.get("users")
+        or data.get("user_list")
+        or data.get("result")
+        or []
+    )
+    if isinstance(candidates, dict):
+        candidates = candidates.get("items") or candidates.get("users") or []
+    if not isinstance(candidates, list):
+        return []
+    return [item for item in candidates if isinstance(item, dict)]
+
+
+def extract_lark_department_data(item: Dict[str, Any]) -> Tuple[str, List[str]]:
+    names: List[str] = []
+    department_ids: List[str] = []
+
+    for key in DEPARTMENT_FIELDS + (
+        "departments",
+        "department_id",
+        "department_ids",
+        "open_department_id",
+        "open_department_ids",
+        "department_names",
+        "department_path",
+    ):
+        value = item.get(key)
+        if not value:
+            continue
+        if key in (
+            "department_id",
+            "department_ids",
+            "open_department_id",
+            "open_department_ids",
+        ):
+            department_ids.extend(flatten_string_values(value))
+            continue
+        extracted_names, extracted_ids = normalize_department_value(value)
+        names.extend(extracted_names)
+        department_ids.extend(extracted_ids)
+
+    return " / ".join(dedupe_non_empty(names)), dedupe_non_empty(department_ids)
+
+
+def normalize_department_value(value: Any) -> Tuple[List[str], List[str]]:
+    if isinstance(value, str):
+        return [value], []
+    if isinstance(value, dict):
+        i18n_name = value.get("i18n_name")
+        if not isinstance(i18n_name, dict):
+            i18n_name = {}
+        name = clean(
+            value.get("name")
+            or value.get("department_name")
+            or value.get("department_path")
+            or i18n_name.get("zh_cn")
+            or i18n_name.get("zh-CN")
+        )
+        department_id = clean(
+            value.get("department_id")
+            or value.get("open_department_id")
+            or value.get("id")
+        )
+        return ([name] if name else []), ([department_id] if department_id else [])
+    if isinstance(value, list):
+        names: List[str] = []
+        department_ids: List[str] = []
+        for item in value:
+            extracted_names, extracted_ids = normalize_department_value(item)
+            names.extend(extracted_names)
+            department_ids.extend(extracted_ids)
+        return names, department_ids
+    return [], []
+
+
+def extract_lark_department_name(payload: Dict[str, Any]) -> str:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    department = data.get("department") if isinstance(data.get("department"), dict) else data
+    if not isinstance(department, dict):
+        return ""
+    i18n_name = department.get("i18n_name")
+    if not isinstance(i18n_name, dict):
+        i18n_name = {}
+    return clean(
+        department.get("name")
+        or department.get("department_name")
+        or i18n_name.get("zh_cn")
+        or i18n_name.get("zh-CN")
+    )
+
+
 def resolve_sales_contact(
     sales_name: str,
-    directory: List[Dict[str, str]],
+    directory: List[Dict[str, Any]],
     target_department: str,
 ) -> Dict[str, Any]:
     candidates = [
@@ -487,6 +825,16 @@ def resolve_sales_contact(
         }
 
     if len(candidates) == 1:
+        if not candidates[0].get("contact_id"):
+            return {
+                "status": "missing_contact_id",
+                "duplicate_name": False,
+                "selected": {},
+                "candidates": visible_candidates,
+                "message": "Feishu contact for {} has no sendable ID".format(
+                    sales_name
+                ),
+            }
         return {
             "status": "resolved",
             "duplicate_name": False,
@@ -503,6 +851,16 @@ def resolve_sales_contact(
             if target in clean(item.get("department"))
         ]
         if len(target_matches) == 1:
+            if not target_matches[0].get("contact_id"):
+                return {
+                    "status": "missing_contact_id",
+                    "duplicate_name": True,
+                    "selected": {},
+                    "candidates": visible_candidates,
+                    "message": "Selected Feishu contact for {} has no sendable ID".format(
+                        sales_name
+                    ),
+                }
             return {
                 "status": "resolved_by_department",
                 "duplicate_name": True,
@@ -525,6 +883,36 @@ def resolve_sales_contact(
             sales_name
         ),
     }
+
+
+def dedupe_non_empty(items: Iterable[str]) -> List[str]:
+    deduped = []
+    seen = set()
+    for item in items:
+        value = clean(item)
+        if value and value not in seen:
+            deduped.append(value)
+            seen.add(value)
+    return deduped
+
+
+def flatten_string_values(value: Any) -> List[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        items: List[str] = []
+        for item in value:
+            items.extend(flatten_string_values(item))
+        return items
+    if isinstance(value, dict):
+        return [
+            clean(
+                value.get("department_id")
+                or value.get("open_department_id")
+                or value.get("id")
+            )
+        ]
+    return []
 
 
 def extract_access_token(payload: Dict[str, Any]) -> Tuple[str, int]:

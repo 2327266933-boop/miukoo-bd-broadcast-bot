@@ -244,14 +244,14 @@ Content-Type: application/json
 - `recipients`：已匹配且可直接群发的 BD 收件人列表；同一个 BD 负责多个商家时会自动合并。
 - `recipient_count`：最终生成的 BD 收件人数。
 
-注意：只查到 `销售名称_最新` 只能证明“商家归属哪个销售”。要让机器人给这个销售发飞书消息，还必须拿到该销售的飞书 `open_id`、`user_id` 或其他可发送的 `contact_id`。
+注意：只查到 `销售名称_最新` 只能证明“商家归属哪个销售”。真实运行时系统会继续调用飞书通讯录按销售姓名搜人，自动拿到可发送的 `open_id/user_id`，你不需要人工查 ID。
 
 ### 重名处理
 
 销售姓名可能重名。系统会按下面规则处理：
 
-- 如果只有一个同名销售，直接使用这个销售的 `contact_id`。
-- 如果有多个同名销售，优先选择部门包含 `服务零售KA——丽人` 的候选人。
+- 如果只有一个同名销售，直接使用飞书搜索结果里的可发送 ID。
+- 如果有多个同名销售，优先选择飞书所属部门包含 `服务零售KA——丽人` 的候选人。
 - 如果 `服务零售KA——丽人` 下唯一命中，则自动使用该候选人，同时在查询结果里标记 `duplicate_name=true`。
 - 如果仍然无法唯一确认，例如同部门也有两个“高流”，结果标记为 `ambiguous`，不会生成可发送对象，需要人工确认。
 
@@ -259,6 +259,23 @@ Content-Type: application/json
 
 ```bash
 SALES_TARGET_DEPARTMENT=服务零售KA——丽人
+```
+
+真实飞书搜索配置：
+
+```bash
+SALES_CONTACT_LOOKUP_PROVIDER=lark
+LARK_APP_ID=cli_xxx
+LARK_APP_SECRET=xxx
+LARK_RECEIVE_ID_TYPE=open_id
+LARK_DEPARTMENT_ID_TYPE=open_department_id
+SALES_TARGET_DEPARTMENT=服务零售KA——丽人
+```
+
+链路是：
+
+```text
+总户商家名称 -> 销售名称_最新 -> 飞书按姓名搜人 -> 按所属部门排重 -> 自动取得 open_id/user_id -> 群发
 ```
 
 ### 本地 CSV 查询
@@ -298,7 +315,7 @@ CSV 示例：
 高流,bd_gaoliu_other,ou_yyy,服务零售KA——到综
 ```
 
-`销售名称_最新` 用来匹配风神结果里的销售姓名；`所属部门` 用来处理重名；`contact_id` 是飞书可发送 ID。
+`销售名称_最新` 用来匹配风神结果里的销售姓名；`所属部门` 用来处理重名；`contact_id` 是飞书可发送 ID。本地 CSV 主要用于 mock 测试，真实运行建议用 `SALES_CONTACT_LOOKUP_PROVIDER=lark` 走飞书搜人。
 
 ### 风神查询
 
@@ -673,6 +690,8 @@ LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
 LARK_VERIFICATION_TOKEN=xxx
 LARK_RECEIVE_ID_TYPE=open_id
+LARK_DEPARTMENT_ID_TYPE=open_department_id
+LARK_TIMEOUT_SECONDS=10
 
 MERCHANT_BD_LOOKUP_PROVIDER=csv
 MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
@@ -685,6 +704,7 @@ FENGSHEN_CLIENT_ID_FIELD=clientId
 FENGSHEN_CLIENT_SECRET_FIELD=clientSecret
 FENGSHEN_SCOPE=
 FENGSHEN_TIMEOUT_SECONDS=10
+SALES_CONTACT_LOOKUP_PROVIDER=auto
 SALES_CONTACT_DIRECTORY_CSV=examples/sales_contact_directory.csv
 SALES_TARGET_DEPARTMENT=服务零售KA——丽人
 
@@ -704,6 +724,9 @@ LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
 LARK_VERIFICATION_TOKEN=xxx
 LARK_RECEIVE_ID_TYPE=open_id
+LARK_DEPARTMENT_ID_TYPE=open_department_id
+SALES_CONTACT_LOOKUP_PROVIDER=lark
+SALES_TARGET_DEPARTMENT=服务零售KA——丽人
 ```
 
 ## 飞书真实接入
@@ -724,15 +747,16 @@ LARK_RECEIVE_ID_TYPE=open_id
 
 - 以机器人身份发送消息
 - 接收用户发送给机器人的消息事件
-- 获取用户 ID 相关权限
+- 搜索用户或读取通讯录用户信息
+- 读取部门信息，用于判断所属部门是否为 `服务零售KA——丽人`
 
-如果 BD 名单里的 `contact_id` 是飞书 `open_id`，保持：
+系统会通过飞书搜人结果拿到可发送 ID。如果发送使用 `open_id`，保持：
 
 ```bash
 LARK_RECEIVE_ID_TYPE=open_id
 ```
 
-如果 BD 名单里维护的是飞书 `user_id`，改成：
+如果你们应用侧要求使用 `user_id`，改成：
 
 ```bash
 LARK_RECEIVE_ID_TYPE=user_id
@@ -768,13 +792,22 @@ export LARK_APP_ID=cli_xxx
 export LARK_APP_SECRET=xxx
 export LARK_VERIFICATION_TOKEN=xxx
 export LARK_RECEIVE_ID_TYPE=open_id
+export LARK_DEPARTMENT_ID_TYPE=open_department_id
+export SALES_CONTACT_LOOKUP_PROVIDER=lark
+export SALES_TARGET_DEPARTMENT=服务零售KA——丽人
 
 python3 -m miukoo_bot --host 0.0.0.0 --port 8080
 ```
 
 ### 5. 创建真实群发任务
 
-任务里的 `channel` 使用 `lark`，`contact_id` 填飞书用户的 `open_id` 或 `user_id`，并与 `LARK_RECEIVE_ID_TYPE` 保持一致。
+推荐先在工作台输入总户商家名称，让系统自动完成：
+
+```text
+总户商家名称 -> 风神查销售名称_最新 -> 飞书搜人 -> 部门排重 -> 生成可发送名单
+```
+
+如果你已经手动有 `contact_id`，仍然可以直接创建任务。直接任务里的 `channel` 使用 `lark`，`contact_id` 填飞书用户的 `open_id` 或 `user_id`，并与 `LARK_RECEIVE_ID_TYPE` 保持一致。
 
 ```json
 {
