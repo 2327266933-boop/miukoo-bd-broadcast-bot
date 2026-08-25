@@ -1,3 +1,5 @@
+import csv
+import io
 import uuid
 from datetime import timedelta
 from typing import Any, Callable, Dict, List
@@ -144,6 +146,59 @@ class BotService:
         if not self.store.cancel_task(task_id):
             raise NotFoundError("Task not found: {}".format(task_id))
         return self.get_task(task_id)
+
+    def export_task_replies_csv(self, task_id: str) -> Dict[str, str]:
+        task = self.get_task(task_id)
+        latest_reply_by_recipient = {}
+        for reply in task["reply_logs"]:
+            latest_reply_by_recipient[reply["recipient_id"]] = reply
+
+        output = io.StringIO()
+        fieldnames = [
+            "task_id",
+            "task_name",
+            "bd_id",
+            "name",
+            "contact_id",
+            "group",
+            "status",
+            "send_count",
+            "remind_count",
+            "reply_count",
+            "last_sent_at",
+            "last_replied_at",
+            "next_remind_at",
+            "last_reply_content",
+            "failure_reason",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
+        writer.writeheader()
+        for recipient in task["recipients"]:
+            latest_reply = latest_reply_by_recipient.get(recipient["id"], {})
+            writer.writerow(
+                {
+                    "task_id": task["id"],
+                    "task_name": task["task_name"],
+                    "bd_id": recipient["bd_id"],
+                    "name": recipient["name"],
+                    "contact_id": recipient["contact_id"],
+                    "group": recipient.get("group") or "",
+                    "status": recipient["status"],
+                    "send_count": recipient["send_count"],
+                    "remind_count": recipient["remind_count"],
+                    "reply_count": recipient["reply_count"],
+                    "last_sent_at": recipient.get("last_sent_at") or "",
+                    "last_replied_at": recipient.get("last_replied_at") or "",
+                    "next_remind_at": recipient.get("next_remind_at") or "",
+                    "last_reply_content": latest_reply.get("content") or "",
+                    "failure_reason": recipient.get("failure_reason") or "",
+                }
+            )
+
+        return {
+            "filename": "{}-reply-summary.csv".format(task["id"]),
+            "content": output.getvalue(),
+        }
 
     def stop_recipient(self, task_id: str, recipient_id: str) -> Dict[str, Any]:
         if not self.store.stop_recipient(task_id, recipient_id):
@@ -340,7 +395,11 @@ class BotService:
     def _send_follow_up(self, recipient: Dict[str, Any], now: Any) -> None:
         self._ensure_contact_daily_limit(recipient["contact_id"], now)
         variables = self._message_variables(recipient)
-        content = self.templates.render(recipient["message_type"], "follow_up", variables)
+        content = self.templates.render(
+            recipient["message_type"],
+            "follow_up",
+            variables,
+        )
         result = self.adapter.send(
             recipient["channel"],
             recipient["contact_id"],

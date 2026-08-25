@@ -1,5 +1,6 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Dict, Tuple
 from urllib.parse import urlparse
 
@@ -18,6 +19,10 @@ def make_handler(service: BotService):
         def do_GET(self) -> None:
             path = urlparse(self.path).path
             try:
+                if path in ("/", "/workbench"):
+                    self._send_workbench()
+                    return
+
                 if path == "/health":
                     self._send_json(200, {"ok": True})
                     return
@@ -31,6 +36,21 @@ def make_handler(service: BotService):
 
                 if path == "/api/tasks":
                     self._send_json(200, {"tasks": service.list_tasks()})
+                    return
+
+                export_task_id = self._match_export_path(path)
+                if export_task_id:
+                    export = service.export_task_replies_csv(export_task_id)
+                    self._send_text(
+                        200,
+                        export["content"],
+                        "text/csv; charset=utf-8",
+                        {
+                            "Content-Disposition": 'attachment; filename="{}"'.format(
+                                export["filename"]
+                            ),
+                        },
+                    )
                     return
 
                 task_id = self._match_task_path(path)
@@ -102,6 +122,31 @@ def make_handler(service: BotService):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_text(
+            self,
+            status_code: int,
+            content: str,
+            content_type: str,
+            extra_headers: Dict[str, str] = None,
+        ) -> None:
+            body = content.encode("utf-8")
+            self.send_response(status_code)
+            self._send_common_headers()
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            for key, value in (extra_headers or {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_workbench(self) -> None:
+            path = Path(__file__).with_name("web").joinpath("index.html")
+            self._send_text(
+                200,
+                path.read_text(encoding="utf-8"),
+                "text/html; charset=utf-8",
+            )
+
         def _send_common_headers(self) -> None:
             self.send_header("Access-Control-Allow-Origin", "*")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -145,6 +190,15 @@ def make_handler(service: BotService):
             if len(parts) == 3 and parts[1] == "recipients":
                 return parts[0], parts[2]
             return "", ""
+
+        def _match_export_path(self, path: str) -> str:
+            prefix = "/api/tasks/"
+            suffix = "/replies.csv"
+            if path.startswith(prefix) and path.endswith(suffix):
+                task_id = path[len(prefix):-len(suffix)]
+                if task_id and "/" not in task_id:
+                    return task_id
+            return ""
 
         def _match_webhook_path(self, path: str) -> str:
             prefix = "/api/webhooks/"

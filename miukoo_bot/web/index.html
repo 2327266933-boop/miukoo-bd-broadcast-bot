@@ -1,0 +1,1012 @@
+<div class="app-shell">
+  <header class="topbar">
+    <div>
+      <h1>BD 群发工作台</h1>
+      <p>任务创建、消息预览、回复跟踪和提醒控制</p>
+    </div>
+    <div class="topbar-actions">
+      <span id="apiStatus" class="status-dot">API 检查中</span>
+      <button id="refreshBtn" type="button">刷新</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel composer">
+      <div class="panel-header">
+        <h2>创建任务</h2>
+        <span class="muted">先预览，再发送</span>
+      </div>
+
+      <div class="form-grid">
+        <label>
+          <span>任务名称</span>
+          <input id="taskName" value="BD任务提醒" />
+        </label>
+        <label>
+          <span>发送渠道</span>
+          <select id="channel">
+            <option value="mock">mock</option>
+            <option value="lark">lark</option>
+          </select>
+        </label>
+        <label>
+          <span>消息类型</span>
+          <select id="messageType"></select>
+        </label>
+      </div>
+
+      <div class="form-grid follow-grid">
+        <label>
+          <span>首次提醒分钟</span>
+          <input id="firstReminder" type="number" min="0" value="120" />
+        </label>
+        <label>
+          <span>提醒间隔分钟</span>
+          <input id="reminderInterval" type="number" min="1" value="180" />
+        </label>
+        <label>
+          <span>最大提醒次数</span>
+          <input id="maxReminders" type="number" min="0" value="2" />
+        </label>
+        <label>
+          <span>免打扰</span>
+          <div class="inline-inputs">
+            <input id="quietStart" value="21:00" />
+            <input id="quietEnd" value="09:00" />
+          </div>
+        </label>
+      </div>
+
+      <div class="segmented" role="tablist">
+        <button id="csvModeBtn" class="active" type="button">CSV名单</button>
+        <button id="jsonModeBtn" type="button">JSON名单</button>
+      </div>
+
+      <label id="csvInputWrap" class="block-label">
+        <span>BD名单 CSV</span>
+        <textarea id="csvInput" spellcheck="false"></textarea>
+      </label>
+
+      <label id="jsonInputWrap" class="block-label hidden">
+        <span>BD名单 JSON</span>
+        <textarea id="jsonInput" spellcheck="false"></textarea>
+      </label>
+
+      <div class="button-row">
+        <button id="loadSampleBtn" type="button" class="secondary">载入示例</button>
+        <button id="previewBtn" type="button" class="secondary">预览消息</button>
+        <button id="createBtn" type="button" class="primary">创建并发送</button>
+      </div>
+
+      <div id="notice" class="notice hidden"></div>
+    </section>
+
+    <section class="panel tasks-panel">
+      <div class="panel-header">
+        <h2>任务列表</h2>
+        <button id="reloadTasksBtn" type="button" class="secondary">刷新任务</button>
+      </div>
+      <div class="task-list-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>任务</th>
+              <th>状态</th>
+              <th>BD</th>
+              <th>回复</th>
+              <th>失败</th>
+            </tr>
+          </thead>
+          <tbody id="taskList"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel preview-panel">
+      <div class="panel-header">
+        <h2>消息预览</h2>
+        <span id="previewCount" class="muted">0 人</span>
+      </div>
+      <div id="previewArea" class="empty-state">暂无预览</div>
+    </section>
+
+    <section class="panel detail-panel">
+      <div class="panel-header detail-header">
+        <div>
+          <h2 id="detailTitle">回复整理</h2>
+          <span id="detailMeta" class="muted">选择任务查看明细</span>
+        </div>
+        <div class="button-row compact">
+          <select id="statusFilter" title="状态筛选">
+            <option value="">全部状态</option>
+            <option value="sent">未回复</option>
+            <option value="followed_up">已提醒</option>
+            <option value="replied">已回复</option>
+            <option value="cancelled">已停催</option>
+            <option value="failed">失败</option>
+            <option value="completed">已完成</option>
+          </select>
+          <button id="exportBtn" type="button" class="secondary" disabled>导出CSV</button>
+        </div>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat"><span id="statTotal">0</span><label>总BD</label></div>
+        <div class="stat"><span id="statReplied">0</span><label>已回复</label></div>
+        <div class="stat"><span id="statPending">0</span><label>待回复</label></div>
+        <div class="stat"><span id="statFailed">0</span><label>失败</label></div>
+      </div>
+
+      <div class="recipients-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>BD</th>
+              <th>分组</th>
+              <th>状态</th>
+              <th>发送</th>
+              <th>提醒</th>
+              <th>最近回复</th>
+              <th>回复内容</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="recipientRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<style>
+  :root {
+    --bg: #f5f7fa;
+    --panel: #ffffff;
+    --text: #172033;
+    --muted: #68758a;
+    --line: #dce2ea;
+    --primary: #1769e0;
+    --primary-strong: #0f55bd;
+    --green: #138a4b;
+    --amber: #a15c00;
+    --red: #be2b2b;
+    --slate: #526070;
+    --radius: 8px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--text);
+    min-height: 36px;
+    padding: 0 12px;
+    cursor: pointer;
+  }
+
+  button:hover {
+    border-color: #9fb1c8;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+    color: #9aa5b5;
+    background: #f4f6f8;
+  }
+
+  button.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+  }
+
+  button.primary:hover {
+    background: var(--primary-strong);
+  }
+
+  button.secondary {
+    background: #f8fafc;
+  }
+
+  input,
+  select,
+  textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--text);
+  }
+
+  input,
+  select {
+    height: 36px;
+    padding: 0 10px;
+  }
+
+  textarea {
+    min-height: 180px;
+    padding: 10px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    border-bottom: 1px solid var(--line);
+    padding: 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  th {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 18px 24px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .topbar h1,
+  .panel h2 {
+    margin: 0;
+    font-weight: 650;
+    letter-spacing: 0;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+  }
+
+  .topbar p {
+    margin: 2px 0 0;
+    color: var(--muted);
+  }
+
+  .topbar-actions,
+  .button-row,
+  .inline-inputs,
+  .panel-header,
+  .stats-row,
+  .segmented {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(360px, 430px) minmax(0, 1fr);
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    min-width: 0;
+  }
+
+  .composer,
+  .tasks-panel,
+  .preview-panel,
+  .detail-panel {
+    padding: 16px;
+  }
+
+  .composer {
+    grid-row: span 3;
+  }
+
+  .panel-header {
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  .panel h2 {
+    font-size: 16px;
+  }
+
+  .muted {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .follow-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  label span,
+  .block-label span {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .block-label {
+    display: block;
+    margin-top: 12px;
+  }
+
+  .inline-inputs input {
+    min-width: 0;
+  }
+
+  .segmented {
+    background: #eef2f7;
+    border-radius: var(--radius);
+    padding: 4px;
+    width: max-content;
+    margin-top: 12px;
+  }
+
+  .segmented button {
+    min-height: 30px;
+    border: 0;
+    background: transparent;
+  }
+
+  .segmented button.active {
+    background: #fff;
+    border: 1px solid var(--line);
+  }
+
+  .button-row {
+    margin-top: 12px;
+    justify-content: flex-end;
+  }
+
+  .compact {
+    margin-top: 0;
+  }
+
+  .status-dot,
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    border-radius: 999px;
+    padding: 0 9px;
+    font-size: 12px;
+    border: 1px solid var(--line);
+    background: #f8fafc;
+    color: var(--slate);
+    white-space: nowrap;
+  }
+
+  .chip.sent,
+  .chip.followed_up {
+    color: var(--amber);
+    background: #fff8ec;
+    border-color: #f1d3a4;
+  }
+
+  .chip.replied,
+  .chip.completed {
+    color: var(--green);
+    background: #effaf3;
+    border-color: #bde4cb;
+  }
+
+  .chip.failed {
+    color: var(--red);
+    background: #fff1f1;
+    border-color: #f0b7b7;
+  }
+
+  .chip.cancelled {
+    color: var(--slate);
+    background: #f1f3f5;
+  }
+
+  .notice {
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: #f8fafc;
+    color: var(--text);
+    white-space: pre-wrap;
+  }
+
+  .notice.error {
+    border-color: #f0b7b7;
+    background: #fff1f1;
+    color: var(--red);
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  .task-list-wrap,
+  .recipients-wrap {
+    overflow: auto;
+    max-height: 340px;
+  }
+
+  .detail-panel {
+    min-height: 420px;
+  }
+
+  .detail-header {
+    align-items: flex-start;
+  }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-bottom: 12px;
+  }
+
+  .stat {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: #fbfcfe;
+  }
+
+  .stat span {
+    display: block;
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  .stat label {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .empty-state {
+    min-height: 120px;
+    display: grid;
+    place-items: center;
+    color: var(--muted);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    background: #fbfcfe;
+  }
+
+  .preview-item {
+    border-top: 1px solid var(--line);
+    padding: 12px 0;
+  }
+
+  .preview-item:first-child {
+    border-top: 0;
+  }
+
+  .message-box {
+    margin-top: 8px;
+    white-space: pre-wrap;
+    background: #f8fafc;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    color: #263247;
+  }
+
+  .task-row {
+    cursor: pointer;
+  }
+
+  .task-row:hover,
+  .task-row.active {
+    background: #f4f8ff;
+  }
+
+  .reply-cell {
+    max-width: 360px;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 1020px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+
+    .composer {
+      grid-row: auto;
+    }
+  }
+
+  @media (max-width: 700px) {
+    .topbar,
+    .panel-header,
+    .detail-header {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .form-grid,
+    .follow-grid,
+    .stats-row {
+      grid-template-columns: 1fr;
+    }
+
+    .button-row {
+      justify-content: stretch;
+      flex-wrap: wrap;
+    }
+
+    .button-row button,
+    .button-row select {
+      flex: 1 1 130px;
+    }
+  }
+</style>
+
+<script>
+  const sampleCsv = `bd_id,name,contact_id,group,city,shop_count,deadline
+bd_001,张三,mock_user_001,华东一区,上海,12,今天 18:00
+bd_002,李四,mock_user_002,华南二区,广州,8,今天 18:00`;
+
+  const sampleJson = JSON.stringify([
+    {
+      bd_id: "bd_001",
+      name: "张三",
+      contact_id: "mock_user_001",
+      group: "华东一区",
+      variables: {
+        city: "上海",
+        shop_count: 12,
+        deadline: "今天 18:00"
+      }
+    },
+    {
+      bd_id: "bd_002",
+      name: "李四",
+      contact_id: "mock_user_002",
+      group: "华南二区",
+      variables: {
+        city: "广州",
+        shop_count: 8,
+        deadline: "今天 18:00"
+      }
+    }
+  ], null, 2);
+
+  const state = {
+    mode: "csv",
+    tasks: [],
+    selectedTask: null
+  };
+
+  const els = {
+    apiStatus: document.getElementById("apiStatus"),
+    refreshBtn: document.getElementById("refreshBtn"),
+    reloadTasksBtn: document.getElementById("reloadTasksBtn"),
+    taskName: document.getElementById("taskName"),
+    channel: document.getElementById("channel"),
+    messageType: document.getElementById("messageType"),
+    firstReminder: document.getElementById("firstReminder"),
+    reminderInterval: document.getElementById("reminderInterval"),
+    maxReminders: document.getElementById("maxReminders"),
+    quietStart: document.getElementById("quietStart"),
+    quietEnd: document.getElementById("quietEnd"),
+    csvModeBtn: document.getElementById("csvModeBtn"),
+    jsonModeBtn: document.getElementById("jsonModeBtn"),
+    csvInputWrap: document.getElementById("csvInputWrap"),
+    jsonInputWrap: document.getElementById("jsonInputWrap"),
+    csvInput: document.getElementById("csvInput"),
+    jsonInput: document.getElementById("jsonInput"),
+    loadSampleBtn: document.getElementById("loadSampleBtn"),
+    previewBtn: document.getElementById("previewBtn"),
+    createBtn: document.getElementById("createBtn"),
+    notice: document.getElementById("notice"),
+    previewCount: document.getElementById("previewCount"),
+    previewArea: document.getElementById("previewArea"),
+    taskList: document.getElementById("taskList"),
+    detailTitle: document.getElementById("detailTitle"),
+    detailMeta: document.getElementById("detailMeta"),
+    statusFilter: document.getElementById("statusFilter"),
+    exportBtn: document.getElementById("exportBtn"),
+    recipientRows: document.getElementById("recipientRows"),
+    statTotal: document.getElementById("statTotal"),
+    statReplied: document.getElementById("statReplied"),
+    statPending: document.getElementById("statPending"),
+    statFailed: document.getElementById("statFailed")
+  };
+
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function statusLabel(status) {
+    const map = {
+      pending: "待发送",
+      sending: "发送中",
+      sent: "待回复",
+      replied: "已回复",
+      waiting_follow_up: "待提醒",
+      followed_up: "已提醒",
+      completed: "已完成",
+      cancelled: "已停催",
+      failed: "失败"
+    };
+    return map[status] || status || "-";
+  }
+
+  async function api(path, options = {}) {
+    const response = await fetch(path, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {})
+      },
+      ...options
+    });
+    const contentType = response.headers.get("Content-Type") || "";
+    const body = contentType.includes("application/json")
+      ? await response.json()
+      : await response.text();
+    if (!response.ok) {
+      const message = typeof body === "string" ? body : body.error;
+      throw new Error(message || `HTTP ${response.status}`);
+    }
+    return body;
+  }
+
+  function parseCsv(text) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      const next = text[index + 1];
+      if (char === '"' && inQuotes && next === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === "," && !inQuotes) {
+        row.push(field);
+        field = "";
+      } else if ((char === "\n" || char === "\r") && !inQuotes) {
+        if (char === "\r" && next === "\n") {
+          index += 1;
+        }
+        row.push(field);
+        if (row.some((item) => item.trim() !== "")) {
+          rows.push(row);
+        }
+        row = [];
+        field = "";
+      } else {
+        field += char;
+      }
+    }
+    row.push(field);
+    if (row.some((item) => item.trim() !== "")) {
+      rows.push(row);
+    }
+    if (rows.length < 2) {
+      return [];
+    }
+
+    const headers = rows[0].map((item) => item.trim());
+    return rows.slice(1).map((values) => {
+      const raw = {};
+      headers.forEach((header, index) => {
+        raw[header] = (values[index] || "").trim();
+      });
+      const variables = {};
+      Object.entries(raw).forEach(([key, value]) => {
+        if (!value) return;
+        if (["bd_id", "name", "contact_id", "mobile", "group"].includes(key)) return;
+        if (key === "variables_json") {
+          Object.assign(variables, JSON.parse(value));
+        } else if (key.startsWith("variable_")) {
+          variables[key.slice("variable_".length)] = value;
+        } else {
+          variables[key] = value;
+        }
+      });
+      return {
+        bd_id: raw.bd_id || raw.contact_id || raw.mobile,
+        name: raw.name,
+        contact_id: raw.contact_id || raw.mobile,
+        mobile: raw.mobile,
+        group: raw.group,
+        variables
+      };
+    });
+  }
+
+  function buildPayload() {
+    const recipients = state.mode === "csv"
+      ? parseCsv(els.csvInput.value)
+      : JSON.parse(els.jsonInput.value);
+    return {
+      task_name: els.taskName.value.trim(),
+      channel: els.channel.value,
+      message_type: els.messageType.value,
+      recipients,
+      follow_up: {
+        enabled: Number(els.maxReminders.value) > 0,
+        first_remind_after_minutes: Number(els.firstReminder.value),
+        remind_interval_minutes: Number(els.reminderInterval.value),
+        max_remind_times: Number(els.maxReminders.value),
+        stop_when_replied: true,
+        quiet_hours: {
+          start: els.quietStart.value.trim(),
+          end: els.quietEnd.value.trim()
+        }
+      }
+    };
+  }
+
+  function showNotice(message, isError = false) {
+    els.notice.textContent = message;
+    els.notice.classList.toggle("error", isError);
+    els.notice.classList.remove("hidden");
+  }
+
+  function clearNotice() {
+    els.notice.classList.add("hidden");
+    els.notice.textContent = "";
+  }
+
+  function renderPreview(preview) {
+    els.previewCount.textContent = `${preview.recipient_count} 人`;
+    if (!preview.recipients.length) {
+      els.previewArea.className = "empty-state";
+      els.previewArea.textContent = "暂无预览";
+      return;
+    }
+    els.previewArea.className = "";
+    els.previewArea.innerHTML = preview.recipients.map((recipient) => `
+      <div class="preview-item">
+        <strong>${escapeHtml(recipient.name)}</strong>
+        <span class="muted">${escapeHtml(recipient.group || "-")} · ${escapeHtml(recipient.contact_id)}</span>
+        <div class="message-box">${escapeHtml(recipient.messages.initial)}</div>
+        ${recipient.messages.follow_up ? `<div class="message-box">${escapeHtml(recipient.messages.follow_up)}</div>` : ""}
+      </div>
+    `).join("");
+  }
+
+  function taskStats(task) {
+    const recipients = task.recipients || [];
+    const total = recipients.length;
+    const replied = recipients.filter((item) => item.status === "replied").length;
+    const failed = recipients.filter((item) => item.status === "failed").length;
+    const pending = recipients.filter((item) => ["sent", "waiting_follow_up", "followed_up"].includes(item.status)).length;
+    return { total, replied, failed, pending };
+  }
+
+  function renderTasks() {
+    if (!state.tasks.length) {
+      els.taskList.innerHTML = `<tr><td colspan="5" class="muted">暂无任务</td></tr>`;
+      return;
+    }
+    els.taskList.innerHTML = state.tasks.map((task) => `
+      <tr class="task-row ${state.selectedTask && state.selectedTask.id === task.id ? "active" : ""}" data-task-id="${escapeHtml(task.id)}">
+        <td>
+          <strong>${escapeHtml(task.task_name)}</strong>
+          <div class="muted">${escapeHtml(task.message_type)} · ${escapeHtml(task.created_at || "")}</div>
+        </td>
+        <td><span class="chip ${escapeHtml(task.status)}">${escapeHtml(statusLabel(task.status))}</span></td>
+        <td>${task.recipient_count || 0}</td>
+        <td>${task.replied_count || 0}</td>
+        <td>${task.failed_count || 0}</td>
+      </tr>
+    `).join("");
+    document.querySelectorAll(".task-row").forEach((row) => {
+      row.addEventListener("click", () => loadTask(row.dataset.taskId));
+    });
+  }
+
+  function renderTaskDetail(task) {
+    state.selectedTask = task;
+    const stats = taskStats(task);
+    els.detailTitle.textContent = task.task_name;
+    els.detailMeta.textContent = `${task.message_type} · ${task.created_at}`;
+    els.statTotal.textContent = stats.total;
+    els.statReplied.textContent = stats.replied;
+    els.statPending.textContent = stats.pending;
+    els.statFailed.textContent = stats.failed;
+    els.exportBtn.disabled = false;
+
+    const latestReply = {};
+    (task.reply_logs || []).forEach((reply) => {
+      latestReply[reply.recipient_id] = reply;
+    });
+    const filter = els.statusFilter.value;
+    const rows = (task.recipients || []).filter((recipient) => !filter || recipient.status === filter);
+    if (!rows.length) {
+      els.recipientRows.innerHTML = `<tr><td colspan="8" class="muted">没有匹配记录</td></tr>`;
+      return;
+    }
+    els.recipientRows.innerHTML = rows.map((recipient) => {
+      const reply = latestReply[recipient.id] || {};
+      const active = ["sent", "waiting_follow_up", "followed_up"].includes(recipient.status);
+      return `
+        <tr>
+          <td>
+            <strong>${escapeHtml(recipient.name)}</strong>
+            <div class="muted">${escapeHtml(recipient.bd_id)} · ${escapeHtml(recipient.contact_id)}</div>
+          </td>
+          <td>${escapeHtml(recipient.group || "-")}</td>
+          <td><span class="chip ${escapeHtml(recipient.status)}">${escapeHtml(statusLabel(recipient.status))}</span></td>
+          <td>${recipient.send_count}</td>
+          <td>${recipient.remind_count}</td>
+          <td>${escapeHtml(recipient.last_replied_at || "-")}</td>
+          <td class="reply-cell">${escapeHtml(reply.content || "-")}</td>
+          <td>
+            <button type="button" class="secondary stop-btn" data-recipient-id="${escapeHtml(recipient.id)}" ${active ? "" : "disabled"}>停催</button>
+          </td>
+        </tr>
+      `;
+    }).join("");
+    document.querySelectorAll(".stop-btn").forEach((button) => {
+      button.addEventListener("click", () => stopRecipient(button.dataset.recipientId));
+    });
+    renderTasks();
+  }
+
+  async function loadTemplates() {
+    const data = await api("/api/templates");
+    els.messageType.innerHTML = data.message_types.map((type) => `
+      <option value="${escapeHtml(type)}">${escapeHtml(type)}</option>
+    `).join("");
+    els.messageType.value = "inventory_check";
+  }
+
+  async function loadTasks() {
+    const data = await api("/api/tasks");
+    state.tasks = data.tasks || [];
+    renderTasks();
+    if (state.selectedTask) {
+      const stillExists = state.tasks.some((task) => task.id === state.selectedTask.id);
+      if (stillExists) {
+        await loadTask(state.selectedTask.id);
+      }
+    }
+  }
+
+  async function loadTask(taskId) {
+    const task = await api(`/api/tasks/${taskId}`);
+    renderTaskDetail(task);
+  }
+
+  async function previewTask() {
+    clearNotice();
+    try {
+      const preview = await api("/api/tasks/preview", {
+        method: "POST",
+        body: JSON.stringify(buildPayload())
+      });
+      renderPreview(preview);
+      showNotice(`已生成 ${preview.recipient_count} 人预览`);
+    } catch (error) {
+      showNotice(error.message, true);
+    }
+  }
+
+  async function createTask() {
+    clearNotice();
+    try {
+      const task = await api("/api/tasks", {
+        method: "POST",
+        body: JSON.stringify(buildPayload())
+      });
+      showNotice(`任务已创建：${task.id}`);
+      await loadTasks();
+      await loadTask(task.id);
+    } catch (error) {
+      showNotice(error.message, true);
+    }
+  }
+
+  async function stopRecipient(recipientId) {
+    if (!state.selectedTask) return;
+    try {
+      const task = await api(`/api/tasks/${state.selectedTask.id}/recipients/${recipientId}/stop`, {
+        method: "POST",
+        body: "{}"
+      });
+      renderTaskDetail(task);
+      showNotice("已停止该 BD 后续提醒");
+    } catch (error) {
+      showNotice(error.message, true);
+    }
+  }
+
+  function setMode(mode) {
+    state.mode = mode;
+    els.csvModeBtn.classList.toggle("active", mode === "csv");
+    els.jsonModeBtn.classList.toggle("active", mode === "json");
+    els.csvInputWrap.classList.toggle("hidden", mode !== "csv");
+    els.jsonInputWrap.classList.toggle("hidden", mode !== "json");
+  }
+
+  async function init() {
+    els.csvInput.value = sampleCsv;
+    els.jsonInput.value = sampleJson;
+    els.loadSampleBtn.addEventListener("click", () => {
+      els.csvInput.value = sampleCsv;
+      els.jsonInput.value = sampleJson;
+    });
+    els.csvModeBtn.addEventListener("click", () => setMode("csv"));
+    els.jsonModeBtn.addEventListener("click", () => setMode("json"));
+    els.previewBtn.addEventListener("click", previewTask);
+    els.createBtn.addEventListener("click", createTask);
+    els.refreshBtn.addEventListener("click", loadTasks);
+    els.reloadTasksBtn.addEventListener("click", loadTasks);
+    els.statusFilter.addEventListener("change", () => {
+      if (state.selectedTask) renderTaskDetail(state.selectedTask);
+    });
+    els.exportBtn.addEventListener("click", () => {
+      if (state.selectedTask) {
+        window.open(`/api/tasks/${state.selectedTask.id}/replies.csv`, "_blank");
+      }
+    });
+
+    try {
+      await api("/health");
+      els.apiStatus.textContent = "API 正常";
+      await loadTemplates();
+      await loadTasks();
+    } catch (error) {
+      els.apiStatus.textContent = "API 异常";
+      showNotice(error.message, true);
+    }
+  }
+
+  init();
+  setInterval(loadTasks, 15000);
+</script>
