@@ -41,6 +41,7 @@
 - 模板引擎：按消息类型渲染首发消息和提醒消息。
 - Mock 消息适配器：本地打印消息，不真实触达 BD。
 - 飞书/Lark 发送适配器：配置密钥后可调用飞书消息 API。
+- 飞书事件回调：支持 URL 校验和 `im.message.receive_v1` 用户消息事件。
 - CSV 导入：支持从表格导出的 CSV 创建收件人名单。
 - 任务预览：正式发送前可预览每个 BD 实际收到的消息。
 - 单人停催：支持对某个收件人停止后续提醒。
@@ -113,6 +114,14 @@ curl http://127.0.0.1:8080/api/tasks
 curl -X POST http://127.0.0.1:8080/api/webhooks/mock/message \
   -H 'Content-Type: application/json' \
   -d '{"task_id":"替换成任务ID","bd_id":"bd_001","content":"已确认"}'
+```
+
+模拟飞书 URL 校验：
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/webhooks/lark/events \
+  -H 'Content-Type: application/json' \
+  -d '{"schema":"2.0","header":{"event_type":"url_verification","token":"你的VerificationToken"},"event":{"challenge":"test_challenge"}}'
 ```
 
 停止某个 BD 后续提醒：
@@ -414,6 +423,12 @@ POST /api/tasks/{task_id}/recipients/{recipient_id}/stop
 POST /api/webhooks/{channel}/message
 ```
 
+飞书事件回调建议使用：
+
+```http
+POST /api/webhooks/lark/events
+```
+
 ## 环境变量
 
 ```bash
@@ -425,6 +440,7 @@ BD_BOT_SCHEDULER_INTERVAL_SECONDS=30
 
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
+LARK_VERIFICATION_TOKEN=xxx
 LARK_RECEIVE_ID_TYPE=open_id
 
 DEFAULT_FIRST_REMIND_AFTER_MINUTES=120
@@ -441,7 +457,104 @@ QUIET_HOURS_END=09:00
 BD_BOT_ADAPTER=lark
 LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
+LARK_VERIFICATION_TOKEN=xxx
 LARK_RECEIVE_ID_TYPE=open_id
+```
+
+## 飞书真实接入
+
+### 1. 创建飞书自建应用
+
+在飞书开放平台创建企业自建应用，并开启机器人能力。
+
+至少需要配置：
+
+- `App ID`：填入 `LARK_APP_ID`
+- `App Secret`：填入 `LARK_APP_SECRET`
+- `Verification Token`：填入 `LARK_VERIFICATION_TOKEN`
+
+### 2. 配置权限
+
+在飞书应用后台申请并发布权限：
+
+- 以机器人身份发送消息
+- 接收用户发送给机器人的消息事件
+- 获取用户 ID 相关权限
+
+如果 BD 名单里的 `contact_id` 是飞书 `open_id`，保持：
+
+```bash
+LARK_RECEIVE_ID_TYPE=open_id
+```
+
+如果 BD 名单里维护的是飞书 `user_id`，改成：
+
+```bash
+LARK_RECEIVE_ID_TYPE=user_id
+```
+
+### 3. 配置事件订阅
+
+事件订阅 URL 填：
+
+```text
+https://你的公网域名/api/webhooks/lark/events
+```
+
+本地调试时可以用内网穿透把 8080 暴露成 HTTPS 地址，例如：
+
+```bash
+ngrok http 8080
+```
+
+然后在飞书后台填：
+
+```text
+https://你的-ngrok-域名/api/webhooks/lark/events
+```
+
+当前 MVP 支持未加密事件。飞书事件订阅里先不要开启事件加密；如果开启了加密，当前服务会返回错误，后续需要补 AES 解密逻辑。
+
+### 4. 启动真实发送模式
+
+```bash
+export BD_BOT_ADAPTER=lark
+export LARK_APP_ID=cli_xxx
+export LARK_APP_SECRET=xxx
+export LARK_VERIFICATION_TOKEN=xxx
+export LARK_RECEIVE_ID_TYPE=open_id
+
+python3 -m miukoo_bot --host 0.0.0.0 --port 8080
+```
+
+### 5. 创建真实群发任务
+
+任务里的 `channel` 使用 `lark`，`contact_id` 填飞书用户的 `open_id` 或 `user_id`，并与 `LARK_RECEIVE_ID_TYPE` 保持一致。
+
+```json
+{
+  "task_name": "BD任务提醒",
+  "channel": "lark",
+  "message_type": "task_urge",
+  "recipients": [
+    {
+      "bd_id": "bd_001",
+      "name": "张三",
+      "contact_id": "ou_xxx",
+      "variables": {
+        "task_title": "确认门店库存",
+        "owner_name": "张三",
+        "deadline": "今天 18:00"
+      }
+    }
+  ],
+  "follow_up": {
+    "enabled": true,
+    "first_remind_after_minutes": 120,
+    "remind_interval_minutes": 180,
+    "max_remind_times": 2
+  }
+}
 ```
 
 ## 发送前校验

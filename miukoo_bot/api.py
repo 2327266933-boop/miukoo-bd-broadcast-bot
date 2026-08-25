@@ -69,8 +69,7 @@ def make_handler(service: BotService):
                 webhook_channel = self._match_webhook_path(path)
                 if webhook_channel:
                     payload = self._read_json()
-                    payload.setdefault("channel", webhook_channel)
-                    self._send_json(200, service.record_reply(payload))
+                    self._send_json(200, service.handle_webhook(webhook_channel, payload))
                     return
 
                 if path == "/api/scheduler/run-once":
@@ -149,11 +148,11 @@ def make_handler(service: BotService):
 
         def _match_webhook_path(self, path: str) -> str:
             prefix = "/api/webhooks/"
-            suffix = "/message"
-            if path.startswith(prefix) and path.endswith(suffix):
-                channel = path[len(prefix):-len(suffix)]
-                if channel and "/" not in channel:
-                    return channel
+            for suffix in ("/message", "/events"):
+                if path.startswith(prefix) and path.endswith(suffix):
+                    channel = path[len(prefix):-len(suffix)]
+                    if channel and "/" not in channel:
+                        return channel
             return ""
 
     return BotHTTPRequestHandler

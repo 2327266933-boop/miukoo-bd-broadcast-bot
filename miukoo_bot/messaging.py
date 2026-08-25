@@ -7,6 +7,7 @@ from urllib import error, request
 
 from miukoo_bot.config import Settings
 
+
 class MessageSendError(RuntimeError):
     pass
 

@@ -84,6 +84,7 @@ class BotServiceTest(unittest.TestCase):
             quiet_hours_end="00:00",
             lark_app_id=None,
             lark_app_secret=None,
+            lark_verification_token=None,
             lark_receive_id_type="open_id",
         )
         self.store = SQLiteStore(self.settings.database_path)
@@ -202,6 +203,7 @@ class BotServiceTest(unittest.TestCase):
             quiet_hours_end=self.settings.quiet_hours_end,
             lark_app_id=None,
             lark_app_secret=None,
+            lark_verification_token=None,
             lark_receive_id_type="open_id",
         )
         self.service = BotService(
@@ -220,6 +222,132 @@ class BotServiceTest(unittest.TestCase):
         self.assertEqual(second["recipients"][0]["status"], "failed")
         self.assertIn("Daily message limit", second["recipients"][0]["failure_reason"])
         self.assertEqual(len(self.adapter.sent), 1)
+
+    def test_lark_url_verification_returns_challenge(self):
+        self._set_lark_token("verify-token")
+
+        response = self.service.handle_webhook(
+            "lark",
+            {
+                "schema": "2.0",
+                "header": {
+                    "event_type": "url_verification",
+                    "token": "verify-token",
+                },
+                "event": {
+                    "challenge": "challenge-value",
+                },
+            },
+        )
+
+        self.assertEqual(response, {"challenge": "challenge-value"})
+
+    def test_lark_url_verification_rejects_wrong_token(self):
+        self._set_lark_token("verify-token")
+
+        with self.assertRaises(ValidationError):
+            self.service.handle_webhook(
+                "lark",
+                {
+                    "type": "url_verification",
+                    "token": "wrong-token",
+                    "challenge": "challenge-value",
+                },
+            )
+
+    def test_lark_message_event_records_reply_by_open_id(self):
+        self._set_lark_token("verify-token")
+        payload = build_payload()
+        payload["channel"] = "lark"
+        payload["recipients"][0]["contact_id"] = "ou_mock_user"
+        task = self.service.create_task(payload)
+
+        response = self.service.handle_webhook(
+            "lark",
+            {
+                "schema": "2.0",
+                "header": {
+                    "event_id": "event_001",
+                    "event_type": "im.message.receive_v1",
+                    "token": "verify-token",
+                },
+                "event": {
+                    "sender": {
+                        "sender_type": "user",
+                        "sender_id": {
+                            "open_id": "ou_mock_user",
+                            "user_id": "user_mock",
+                        },
+                    },
+                    "message": {
+                        "message_id": "om_mock",
+                        "message_type": "text",
+                        "content": "{\"text\":\"已确认\"}",
+                    },
+                },
+            },
+        )
+        updated = self.service.get_task(task["id"])
+
+        self.assertTrue(response["recorded"])
+        self.assertEqual(response["task_id"], task["id"])
+        self.assertEqual(updated["recipients"][0]["status"], "replied")
+        self.assertEqual(updated["reply_logs"][0]["content"], "已确认")
+
+    def test_lark_message_without_matching_task_is_ignored(self):
+        self._set_lark_token("verify-token")
+
+        response = self.service.handle_webhook(
+            "lark",
+            {
+                "schema": "2.0",
+                "header": {
+                    "event_type": "im.message.receive_v1",
+                    "token": "verify-token",
+                },
+                "event": {
+                    "sender": {
+                        "sender_type": "user",
+                        "sender_id": {
+                            "open_id": "unknown_user",
+                        },
+                    },
+                    "message": {
+                        "message_id": "om_unknown",
+                        "message_type": "text",
+                        "content": "{\"text\":\"已确认\"}",
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(response["reason"], "no_matching_recipient")
+
+    def _set_lark_token(self, token):
+        self.settings = Settings(
+            database_path=self.settings.database_path,
+            host=self.settings.host,
+            port=self.settings.port,
+            message_adapter=self.settings.message_adapter,
+            scheduler_interval_seconds=self.settings.scheduler_interval_seconds,
+            default_first_remind_after_minutes=self.settings.default_first_remind_after_minutes,
+            default_remind_interval_minutes=self.settings.default_remind_interval_minutes,
+            default_max_remind_times=self.settings.default_max_remind_times,
+            daily_message_limit_per_contact=self.settings.daily_message_limit_per_contact,
+            quiet_hours_start=self.settings.quiet_hours_start,
+            quiet_hours_end=self.settings.quiet_hours_end,
+            lark_app_id=None,
+            lark_app_secret=None,
+            lark_verification_token=token,
+            lark_receive_id_type="open_id",
+        )
+        self.service = BotService(
+            store=self.store,
+            templates=TemplateStore(),
+            adapter=self.adapter,
+            settings=self.settings,
+            clock=self.clock,
+        )
 
 
 if __name__ == "__main__":

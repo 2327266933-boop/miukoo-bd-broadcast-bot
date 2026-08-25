@@ -18,6 +18,7 @@ class Settings:
     quiet_hours_end: str
     lark_app_id: Optional[str]
     lark_app_secret: Optional[str]
+    lark_verification_token: Optional[str]
     lark_receive_id_type: str
 
 
@@ -42,5 +43,6 @@ def load_settings() -> Settings:
         quiet_hours_end=os.environ.get("QUIET_HOURS_END", "09:00"),
         lark_app_id=os.environ.get("LARK_APP_ID"),
         lark_app_secret=os.environ.get("LARK_APP_SECRET"),
+        lark_verification_token=os.environ.get("LARK_VERIFICATION_TOKEN"),
         lark_receive_id_type=os.environ.get("LARK_RECEIVE_ID_TYPE", "open_id"),
     )

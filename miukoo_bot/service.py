@@ -5,6 +5,12 @@ from typing import Any, Callable, Dict, List
 from miukoo_bot.config import Settings
 from miukoo_bot.db import SQLiteStore, TERMINAL_RECIPIENT_STATUSES
 from miukoo_bot.importers import load_recipients_from_csv
+from miukoo_bot.lark_events import (
+    LarkEventError,
+    build_lark_challenge_response,
+    is_lark_url_verification,
+    parse_lark_reply_event,
+)
 from miukoo_bot.messaging import MessageAdapter
 from miukoo_bot.templates import TemplateStore
 from miukoo_bot.time_utils import is_quiet_time, next_allowed_time, to_iso, utc_now
@@ -172,6 +178,57 @@ class BotService:
         )
         self.store.refresh_task_status(recipient["task_id"])
         return self.get_task(recipient["task_id"])
+
+    def handle_webhook(self, channel: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if channel in ("lark", "feishu"):
+            return self.handle_lark_webhook(payload)
+
+        payload = dict(payload)
+        payload.setdefault("channel", channel)
+        return self.record_reply(payload)
+
+    def handle_lark_webhook(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            if is_lark_url_verification(payload):
+                return build_lark_challenge_response(
+                    payload,
+                    self.settings.lark_verification_token,
+                )
+
+            event = parse_lark_reply_event(
+                payload,
+                self.settings.lark_verification_token,
+                self.settings.lark_receive_id_type,
+            )
+        except LarkEventError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        if event is None:
+            return {"code": 0, "ignored": True, "reason": "unsupported_lark_event"}
+
+        try:
+            task = self.record_reply(
+                {
+                    "contact_id": event.contact_id,
+                    "content": event.content,
+                    "platform_message_id": event.platform_message_id,
+                }
+            )
+        except NotFoundError:
+            return {
+                "code": 0,
+                "ignored": True,
+                "reason": "no_matching_recipient",
+                "contact_id": event.contact_id,
+            }
+
+        return {
+            "code": 0,
+            "recorded": True,
+            "task_id": task["id"],
+            "contact_id": event.contact_id,
+            "event_id": event.event_id,
+        }
 
     def process_follow_ups(self) -> Dict[str, Any]:
         now = self.clock()
