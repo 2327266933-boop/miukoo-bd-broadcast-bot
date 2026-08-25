@@ -217,9 +217,11 @@ http://127.0.0.1:8080/workbench
 
 页面中的“创建并发送”会真实调用当前服务的 `/api/tasks`。如果当前 `channel=lark` 且环境变量已配置飞书密钥，会真实发送飞书消息；测试时建议先使用 `channel=mock`。
 
-## 商家名称查询 BD
+## 总户商家名称查询销售/BD
 
-工作台里可以先输入商家名称，查询对应 BD，再把结果填入群发名单。查询接口：
+工作台里可以先输入总户商家名称关键词，查询对应销售，再把可发送对象填入群发名单。例如输入 `沐暮子`，如果风神或本地映射表里有 `杭州沐暮子科技有限公司`，且 `销售名称_最新` 是 `高流`，系统会返回销售 `高流`。
+
+查询接口：
 
 ```http
 POST /api/merchant-bd/lookup
@@ -229,7 +231,7 @@ Content-Type: application/json
 ```json
 {
   "merchant_names": [
-    "上海悦来火锅",
+    "沐暮子",
     "广州花城茶餐厅"
   ]
 }
@@ -237,9 +239,11 @@ Content-Type: application/json
 
 返回里会包含：
 
-- `results`：每个商家的查询结果，状态包括 `matched`、`ambiguous`、`not_found`。
+- `results`：每个总户商家的查询结果，状态包括 `matched`、`ambiguous`、`not_found`。
 - `recipients`：已匹配且可直接群发的 BD 收件人列表；同一个 BD 负责多个商家时会自动合并。
 - `recipient_count`：最终生成的 BD 收件人数。
+
+注意：只查到 `销售名称_最新` 只能证明“商家归属哪个销售”。要让机器人给这个销售发飞书消息，还必须拿到该销售的飞书 `open_id`、`user_id` 或其他可发送的 `contact_id`。
 
 ### 本地 CSV 查询
 
@@ -253,18 +257,18 @@ MERCHANT_BD_MAPPING_CSV=examples/merchant_bd_mapping.csv
 CSV 示例：
 
 ```csv
-merchant_name,bd_id,name,contact_id,group,city
-上海悦来火锅,bd_001,张三,mock_user_001,华东一区,上海
-广州花城茶餐厅,bd_002,李四,mock_user_002,华南二区,广州
+总户商家名称,销售名称_最新,bd_id,contact_id,group,city
+杭州沐暮子科技有限公司,高流,bd_gaoliu,mock_user_gaoliu,华东一区,杭州
+广州花城茶餐厅,李四,bd_002,mock_user_002,华南二区,广州
 ```
 
 字段说明：
 
 | 字段 | 说明 |
 | --- | --- |
-| `merchant_name` | 商家名称 |
+| `总户商家名称` | 风神里的总户商家名称，支持关键词包含匹配 |
+| `销售名称_最新` | 风神里的最新销售名称，例如 `高流` |
 | `bd_id` | BD 内部 ID |
-| `name` | BD 姓名 |
 | `contact_id` | 消息平台用户 ID，例如飞书 `open_id` 或 `user_id` |
 | `group` | BD 分组或区域 |
 
@@ -324,7 +328,7 @@ FENGSHEN_CLIENT_SECRET_FIELD=client_secret
 
 ```json
 {
-  "merchant_names": ["上海悦来火锅"]
+  "merchant_names": ["沐暮子"]
 }
 ```
 
@@ -334,12 +338,12 @@ FENGSHEN_CLIENT_SECRET_FIELD=client_secret
 {
   "results": [
     {
-      "merchant_name": "上海悦来火锅",
+      "merchant_name": "沐暮子",
       "matches": [
         {
-          "merchant_name": "上海悦来火锅",
-          "bd_id": "bd_001",
-          "name": "张三",
+          "总户商家名称": "杭州沐暮子科技有限公司",
+          "销售名称_最新": "高流",
+          "bd_id": "bd_gaoliu",
           "contact_id": "ou_xxx",
           "group": "华东一区"
         }
@@ -349,7 +353,7 @@ FENGSHEN_CLIENT_SECRET_FIELD=client_secret
 }
 ```
 
-如果风神实际字段名不同，可以在 `miukoo_bot/merchant_lookup.py` 的字段别名里补充。
+当前已内置识别 `总户商家名称` 和 `销售名称_最新`。如果风神实际字段名不同，可以在 `miukoo_bot/merchant_lookup.py` 的字段别名里补充。
 
 ## 非目标
 

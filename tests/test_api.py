@@ -62,8 +62,8 @@ class APITest(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory()
         self.mapping_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
         self.mapping_path.write_text(
-            "merchant_name,bd_id,name,contact_id,group,city\n"
-            "上海悦来火锅,bd_001,张三,mock_user_001,华东一区,上海\n",
+            "总户商家名称,销售名称_最新,bd_id,contact_id,group,city\n"
+            "杭州沐暮子科技有限公司,高流,bd_gaoliu,mock_user_gaoliu,华东一区,杭州\n",
             encoding="utf-8",
         )
         self.settings = Settings(
@@ -149,7 +149,7 @@ class APITest(unittest.TestCase):
         request = Request(
             "{}/api/merchant-bd/lookup".format(self.base_url),
             data=json.dumps(
-                {"merchant_names": ["上海悦来火锅", "未知商家"]},
+                {"merchant_names": ["沐暮子", "未知商家"]},
                 ensure_ascii=False,
             ).encode("utf-8"),
             headers={"Content-Type": "application/json"},
@@ -163,7 +163,8 @@ class APITest(unittest.TestCase):
         self.assertEqual(body["matched_count"], 1)
         self.assertEqual(body["unmatched_count"], 1)
         self.assertEqual(body["recipient_count"], 1)
-        self.assertEqual(body["recipients"][0]["contact_id"], "mock_user_001")
+        self.assertEqual(body["results"][0]["matches"][0]["sales_name"], "高流")
+        self.assertEqual(body["recipients"][0]["contact_id"], "mock_user_gaoliu")
 
 
 if __name__ == "__main__":

@@ -279,6 +279,37 @@ class BotServiceTest(unittest.TestCase):
         self.assertEqual(result["recipients"][0]["variables"]["merchant_count"], 2)
         self.assertIn("上海悦来火锅", result["recipients"][0]["variables"]["merchant_names"])
 
+    def test_lookup_supports_total_merchant_name_and_latest_sales_name(self):
+        csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
+        csv_path.write_text(
+            "总户商家名称,销售名称_最新,bd_id,contact_id,group\n"
+            "杭州沐暮子科技有限公司,高流,bd_gaoliu,mock_user_gaoliu,华东一区\n",
+            encoding="utf-8",
+        )
+        self.settings = replace(self.settings, merchant_bd_mapping_csv=str(csv_path))
+        self.service = BotService(
+            store=self.store,
+            templates=TemplateStore(),
+            adapter=self.adapter,
+            settings=self.settings,
+            clock=self.clock,
+        )
+
+        result = self.service.lookup_merchant_bds({"text": "沐暮子"})
+
+        self.assertEqual(result["matched_count"], 1)
+        self.assertEqual(result["results"][0]["merchant_name"], "沐暮子")
+        self.assertEqual(
+            result["results"][0]["matches"][0]["merchant_name"],
+            "杭州沐暮子科技有限公司",
+        )
+        self.assertEqual(result["results"][0]["matches"][0]["sales_name"], "高流")
+        self.assertEqual(result["recipients"][0]["name"], "高流")
+        self.assertEqual(
+            result["recipients"][0]["variables"]["merchant_names"],
+            "杭州沐暮子科技有限公司",
+        )
+
     def test_lookup_recipients_can_render_merchant_follow_up_template(self):
         csv_path = Path(self.tmpdir.name) / "merchant_bd_mapping.csv"
         csv_path.write_text(
@@ -318,6 +349,7 @@ class BotServiceTest(unittest.TestCase):
 
         class FengshenHandler(BaseHTTPRequestHandler):
             def log_message(self, *_args):
+                _ = _args
                 return
 
             def do_POST(handler_self):

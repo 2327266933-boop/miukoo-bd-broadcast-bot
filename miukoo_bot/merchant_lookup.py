@@ -14,16 +14,58 @@ class MerchantLookupError(ValueError):
 
 MERCHANT_NAME_FIELDS = (
     "merchant_name",
+    "total_merchant_name",
+    "head_merchant_name",
     "shop_name",
     "poi_name",
     "store_name",
+    "总户商家名称",
+    "总户商户名称",
+    "总户名称",
     "商家名称",
+    "商户名称",
     "门店名称",
     "POI名称",
 )
-BD_ID_FIELDS = ("bd_id", "bd_user_id", "BDID", "bd编号")
-BD_NAME_FIELDS = ("bd_name", "name", "owner_name", "BD", "bd姓名", "BD姓名")
-CONTACT_ID_FIELDS = ("contact_id", "open_id", "user_id", "mobile", "手机号")
+BD_ID_FIELDS = (
+    "bd_id",
+    "bd_user_id",
+    "sales_id",
+    "sales_user_id",
+    "BDID",
+    "bd编号",
+    "销售ID",
+    "销售id",
+    "销售工号",
+)
+BD_NAME_FIELDS = (
+    "bd_name",
+    "sales_name",
+    "sales_name_latest",
+    "name",
+    "owner_name",
+    "BD",
+    "bd姓名",
+    "BD姓名",
+    "销售名称_最新",
+    "销售名称",
+    "销售",
+    "销售负责人",
+)
+CONTACT_ID_FIELDS = (
+    "contact_id",
+    "open_id",
+    "openId",
+    "user_id",
+    "userId",
+    "mobile",
+    "手机号",
+    "飞书open_id",
+    "飞书user_id",
+    "飞书ID",
+    "销售飞书open_id",
+    "销售飞书user_id",
+)
 GROUP_FIELDS = ("group", "region", "city_group", "区域", "分组", "城市")
 
 
@@ -317,8 +359,8 @@ def normalize_result_item(item: Dict[str, Any], fallback_name: str) -> Dict[str,
 def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Dict[str, Any]:
     cleaned = {str(key).strip(): clean(value) for key, value in row.items()}
     merchant_name = first_value(cleaned, MERCHANT_NAME_FIELDS) or fallback_merchant_name
-    bd_id = first_value(cleaned, BD_ID_FIELDS)
     name = first_value(cleaned, BD_NAME_FIELDS)
+    bd_id = first_value(cleaned, BD_ID_FIELDS) or name
     contact_id = first_value(cleaned, CONTACT_ID_FIELDS)
     group = first_value(cleaned, GROUP_FIELDS)
     variables = {
@@ -335,9 +377,11 @@ def normalize_match(row: Dict[str, Any], fallback_merchant_name: str = "") -> Di
         )
     }
     variables["merchant_name"] = merchant_name
+    variables["sales_name"] = name
     return {
         "merchant_name": merchant_name,
         "bd_id": bd_id,
+        "sales_name": name,
         "name": name,
         "contact_id": contact_id,
         "group": group,
@@ -392,7 +436,9 @@ def build_recipients_from_lookup_results(
                 "variables": dict(match.get("variables") or {}),
                 "_merchant_names": [],
             }
-        grouped[key]["_merchant_names"].append(result["merchant_name"])
+        grouped[key]["_merchant_names"].append(
+            match.get("merchant_name") or result["merchant_name"]
+        )
 
     recipients = []
     for item in grouped.values():
